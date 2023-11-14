@@ -1,0 +1,23 @@
+[package]
+name = "pico_player"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+rmp3 = "0.3.1"
+[dependencies.embassy-rp]
+path = "embassy/embassy-rp"
+[dependencies.embassy-net]
+path = "embassy/embassy-net"
+[dependencies.embassy-time]
+path = "embassy/embassy-time"
+[dependencies.embassy-executor]
+path = "embassy/embassy-executor"
+[dependencies.cyw43]
+path = "embassy/cyw43"
+[dependencies.cyw43-pio]
+path = "embassy/cyw43-pio"
+[dependencies.embassy-sync]
+path = "embassy/embassy-sync"

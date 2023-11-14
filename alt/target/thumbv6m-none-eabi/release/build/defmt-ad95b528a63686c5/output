@@ -1,0 +1,2 @@
+cargo:rustc-link-search=/Users/keegan/Msd/Capstone/pico_player/alt/target/thumbv6m-none-eabi/release/build/defmt-ad95b528a63686c5/out
+cargo:rustc-cfg=no_cas
