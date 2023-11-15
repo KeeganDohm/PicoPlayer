@@ -27,8 +27,8 @@ bind_interrupts!(struct Irqs {
     PIO0_IRQ_0 => InterruptHandler<PIO0>;
 });
 
-const WIFI_NETWORK: &str = "TPL";
-const WIFI_PASSWORD: &str = "icantd55";
+const WIFI_NETWORK: &str = "TZ Guest";
+const WIFI_PASSWORD: &str = "ilovetea";
 
 #[embassy_executor::task]
 async fn wifi_task(

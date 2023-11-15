@@ -1,0 +1,96 @@
+cargo:rerun-if-changed=ffi/minimp3.c
+TARGET = Some("thumbv6m-none-eabi")
+OPT_LEVEL = Some("3")
+HOST = Some("aarch64-apple-darwin")
+cargo:rerun-if-env-changed=CC_thumbv6m-none-eabi
+CC_thumbv6m-none-eabi = None
+cargo:rerun-if-env-changed=CC_thumbv6m_none_eabi
+CC_thumbv6m_none_eabi = None
+cargo:rerun-if-env-changed=TARGET_CC
+TARGET_CC = None
+cargo:rerun-if-env-changed=CC
+CC = None
+RUSTC_LINKER = None
+cargo:rerun-if-env-changed=CROSS_COMPILE
+CROSS_COMPILE = None
+running: "arm-none-eabi-gcc" "--version"
+exit status: 0
+cargo-warning:Compiler version doesn't include clang or GCC: "arm-none-eabi-gcc" "--version"
+cargo:rerun-if-env-changed=CRATE_CC_NO_DEFAULTS
+CRATE_CC_NO_DEFAULTS = None
+DEBUG = Some("true")
+CARGO_CFG_TARGET_FEATURE = Some("mclass,thumb-mode,v5te,v6")
+cargo:rerun-if-env-changed=CFLAGS_thumbv6m-none-eabi
+CFLAGS_thumbv6m-none-eabi = None
+cargo:rerun-if-env-changed=CFLAGS_thumbv6m_none_eabi
+CFLAGS_thumbv6m_none_eabi = None
+cargo:rerun-if-env-changed=TARGET_CFLAGS
+TARGET_CFLAGS = None
+cargo:rerun-if-env-changed=CFLAGS
+CFLAGS = None
+running: "arm-none-eabi-gcc" "-O3" "-ffunction-sections" "-fdata-sections" "-g" "-fno-omit-frame-pointer" "-mthumb" "-march=armv6s-m" "-I" "ffi/minimp3" "-Wall" "-Wextra" "-DMINIMP3_ONLY_MP3" "-DMINIMP3_IMPLEMENTATION" "-o" "/Users/keegan/Msd/Capstone/pico_player/alt/target/thumbv6m-none-eabi/release/build/rmp3-f88b612bd7988ccc/out/ffi/minimp3.o" "-c" "ffi/minimp3.c"
+cargo:warning=In file included from ffi/minimp3.c:2:
+
+cargo:warning=In function 'L3_decode_scalefactors',
+
+cargo:warning=    inlined from 'L3_decode' at ffi/minimp3/minimp3.h:1235:9,
+
+cargo:warning=    inlined from 'mp3dec_decode_frame' at ffi/minimp3/minimp3.h:1763:17:
+
+cargo:warning=ffi/minimp3/minimp3.h:696:42: warning: writing 1 byte into a region of size 0 [-Wstringop-overflow=]
+
+cargo:warning=  696 |             iscf[gr->n_long_sfb + i + 1] += gr->subblock_gain[1] << sh;
+
+cargo:warning=      |             ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+cargo:warning=ffi/minimp3/minimp3.h: In function 'mp3dec_decode_frame':
+
+cargo:warning=ffi/minimp3/minimp3.h:662:26: note: at offset 40 into destination object 'iscf' of size 40
+
+cargo:warning=  662 |     uint8_t scf_size[4], iscf[40];
+
+cargo:warning=      |                          ^~~~
+
+cargo:warning=In function 'L3_decode_scalefactors',
+
+cargo:warning=    inlined from 'L3_decode' at ffi/minimp3/minimp3.h:1235:9,
+
+cargo:warning=    inlined from 'mp3dec_decode_frame' at ffi/minimp3/minimp3.h:1763:17:
+
+cargo:warning=ffi/minimp3/minimp3.h:697:42: warning: writing 1 byte into a region of size 0 [-Wstringop-overflow=]
+
+cargo:warning=  697 |             iscf[gr->n_long_sfb + i + 2] += gr->subblock_gain[2] << sh;
+
+cargo:warning=      |             ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+cargo:warning=ffi/minimp3/minimp3.h: In function 'mp3dec_decode_frame':
+
+cargo:warning=ffi/minimp3/minimp3.h:662:26: note: at offset [41, 296] into destination object 'iscf' of size 40
+
+cargo:warning=  662 |     uint8_t scf_size[4], iscf[40];
+
+cargo:warning=      |                          ^~~~
+
+exit status: 0
+cargo:rerun-if-env-changed=AR_thumbv6m-none-eabi
+AR_thumbv6m-none-eabi = None
+cargo:rerun-if-env-changed=AR_thumbv6m_none_eabi
+AR_thumbv6m_none_eabi = None
+cargo:rerun-if-env-changed=TARGET_AR
+TARGET_AR = None
+cargo:rerun-if-env-changed=AR
+AR = None
+cargo:rerun-if-env-changed=ARFLAGS_thumbv6m-none-eabi
+ARFLAGS_thumbv6m-none-eabi = None
+cargo:rerun-if-env-changed=ARFLAGS_thumbv6m_none_eabi
+ARFLAGS_thumbv6m_none_eabi = None
+cargo:rerun-if-env-changed=TARGET_ARFLAGS
+TARGET_ARFLAGS = None
+cargo:rerun-if-env-changed=ARFLAGS
+ARFLAGS = None
+running: ZERO_AR_DATE="1" "arm-none-eabi-ar" "cq" "/Users/keegan/Msd/Capstone/pico_player/alt/target/thumbv6m-none-eabi/release/build/rmp3-f88b612bd7988ccc/out/libminimp3.a" "/Users/keegan/Msd/Capstone/pico_player/alt/target/thumbv6m-none-eabi/release/build/rmp3-f88b612bd7988ccc/out/ffi/minimp3.o"
+exit status: 0
+running: "arm-none-eabi-ar" "s" "/Users/keegan/Msd/Capstone/pico_player/alt/target/thumbv6m-none-eabi/release/build/rmp3-f88b612bd7988ccc/out/libminimp3.a"
+exit status: 0
+cargo:rustc-link-lib=static=minimp3
+cargo:rustc-link-search=native=/Users/keegan/Msd/Capstone/pico_player/alt/target/thumbv6m-none-eabi/release/build/rmp3-f88b612bd7988ccc/out
