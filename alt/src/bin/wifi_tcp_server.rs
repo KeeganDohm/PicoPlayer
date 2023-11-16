@@ -42,6 +42,24 @@ async fn net_task(stack: &'static Stack<cyw43::NetDriver<'static>>) -> ! {
     stack.run().await
 }
 
+#[embassy_executor::task]
+async fn receive_bytes(){ 
+    //need to check to see if the audio buffer has data in it
+    let mut decoder = RawDecoder::new();
+    let mut output_buf = [Sample::default(); MAX_SAMPLES_PER_FRAME];
+        // pseudocode
+    for byte in audio_buffer{
+        let mut input_buf = [0u8; 1];
+        input_buf[0] = *byte;
+        if let Some((frame, bytes_consumed)) = decoder.next(&mut input_buf, &mut output_buf) {
+            println!("successfully decoded a frame!")
+        }
+        println!("Number of bytes in frame = {}", bytes_consumed);
+        // do something with the frame
+
+        // imaginary_file.skip(bytes_consumed);
+    }
+}
 #[embassy_executor::main]
 async fn main(spawner: Spawner) {
     info!("Hello World!");
