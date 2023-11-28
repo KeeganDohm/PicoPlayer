@@ -1,13 +1,14 @@
-//! This example uses the RP Pico W board Wifi chip (cyw43).
-//! Connects to specified Wifi network and creates a TCP endpoint on port 1234.
-
 #![no_std]
 #![no_main]
 #![feature(type_alias_impl_trait)]
 #![feature(async_fn_in_trait)]
 #![allow(stable_features, unknown_lints, async_fn_in_trait)]
+#![feature(alloc)]
 
-use core::str::from_utf8;
+extern crate alloc;
+use embedded_alloc::Heap;
+
+use alloc::vec::Vec;
 
 use cyw43_pio::PioSpi;
 use defmt::*;
@@ -19,13 +20,16 @@ use embassy_rp::gpio::{Level, Output};
 use embassy_rp::peripherals::{DMA_CH0, PIN_23, PIN_25, PIO0};
 use embassy_rp::pio::{InterruptHandler, Pio};
 use embassy_time::{Duration, Timer};
-use embedded_io_async::Write;
 use static_cell::make_static;
 use {defmt_rtt as _, panic_probe as _};
+
 
 bind_interrupts!(struct Irqs {
     PIO0_IRQ_0 => InterruptHandler<PIO0>;
 });
+
+#[global_allocator]
+static HEAP: Heap = Heap::empty();
 
 const WIFI_NETWORK: &str = "TZ Guest";
 const WIFI_PASSWORD: &str = "ilovetea";
@@ -42,29 +46,41 @@ async fn net_task(stack: &'static Stack<cyw43::NetDriver<'static>>) -> ! {
     stack.run().await
 }
 
-#[embassy_executor::task]
-async fn receive_bytes(){ 
-    //need to check to see if the audio buffer has data in it
-    let mut decoder = RawDecoder::new();
-    let mut output_buf = [Sample::default(); MAX_SAMPLES_PER_FRAME];
+// #[embassy_executor::task]
+//fn decode_buf(buf: Buffer){ 
+    // need to check to see if the audio buffer has data in it
+//    let mut decoder = RawDecoder::new();
+//    let mut output_buf = [Sample::default(); MAX_SAMPLES_PER_FRAME];
         // pseudocode
-    for byte in audio_buffer{
-        let mut input_buf = [0u8; 1];
-        input_buf[0] = *byte;
-        if let Some((frame, bytes_consumed)) = decoder.next(&mut input_buf, &mut output_buf) {
-            println!("successfully decoded a frame!")
-        }
-        println!("Number of bytes in frame = {}", bytes_consumed);
-        // do something with the frame
+//    while buf.
+//}
 
-        // imaginary_file.skip(bytes_consumed);
-    }
-}
+//fn decode_frame(buf: Buffer, output_buf: &[Sample; MAX_SAMPLES_PER_FRAME])-> usize {
+//    if let (frame, bytes_consumed) = decoder.next(buf, &mut output_buf){
+//        buf.advance(bytes_consumed);
+//        frame
+//    }
+//}
+//fn decode_frame<'src, 'dst>(
+//    start: usize,
+//    audio_buf: &'src [u8; 4096],
+//    output_buf: &'dst mut [Sample; MAX_SAMPLES_PER_FRAME],
+//) -> (Frame<'src, 'dst>, usize) {
+//    RawDecoder::new().next(audio_buf, output_buf).unwrap()
+//}
+//fn decode_frame<'a>(start: usize, audio_buf: &'a [u8; 4096], output_buf: &'a mut [Sample; MAX_SAMPLES_PER_FRAME]) -> (Frame<'a, 'a>, usize) {
+//    
+//    let mut decoder = RawDecoder::new();
+//    let (frame, bytes_consumed) = decoder.next(audio_buf, output_buf).unwrap();
+//    return (frame, bytes_consumed);
+//}
+
 #[embassy_executor::main]
 async fn main(spawner: Spawner) {
     info!("Hello World!");
 
     let p = embassy_rp::init(Default::default());
+    let music = include_bytes!("../../../../pico_player_client/Mr_Blue_Sky-Electric_Light_Orchestra.mp3");
 
     let fw = include_bytes!("../../../embassy/cyw43-firmware/43439A0.bin");
     let clm = include_bytes!("../../../embassy/cyw43-firmware/43439A0_clm.bin");
@@ -73,8 +89,8 @@ async fn main(spawner: Spawner) {
     // at hardcoded addresses, instead of baking them into the program with `include_bytes!`:
     //     probe-rs download 43439A0.bin --format bin --chip RP2040 --base-address 0x10100000
     //     probe-rs download 43439A0_clm.bin --format bin --chip RP2040 --base-address 0x10140000
-    //let fw = unsafe { core::slice::from_raw_parts(0x10100000 as *const u8, 230321) };
-    //let clm = unsafe { core::slice::from_raw_parts(0x10140000 as *const u8, 4752) };
+    // let fw = unsafe { core::slice::from_raw_parts(0x10100000 as *const u8, 230321) };
+    // let clm = unsafe { core::slice::from_raw_parts(0x10140000 as *const u8, 4752) };
 
     let pwr = Output::new(p.PIN_23, Level::Low);
     let cs = Output::new(p.PIN_25, Level::High);
@@ -99,6 +115,7 @@ async fn main(spawner: Spawner) {
 
     // Generate random seed
     let seed = 0x0123_4567_89ab_cdef; // chosen by fair dice roll. guarenteed to be random.
+    let _vec: Vec<i32> = Vec::new();
 
     // Init network stack
     let stack = &*make_static!(Stack::new(
@@ -111,7 +128,7 @@ async fn main(spawner: Spawner) {
     unwrap!(spawner.spawn(net_task(stack)));
 
     loop {
-        //control.join_open(WIFI_NETWORK).await;
+        // control.join_open(WIFI_NETWORK).await;
         match control.join_wpa2(WIFI_NETWORK, WIFI_PASSWORD).await {
             Ok(_) => break,
             Err(err) => {
@@ -129,11 +146,12 @@ async fn main(spawner: Spawner) {
 
     // And now we can use it!
 
-    let mut rx_buffer = [0; 4096];
-    let mut tx_buffer = [0; 4096];
-    let mut buf = [0; 4096];
 
     loop {
+        let mut rx_buffer = [0; 4096];
+        let mut tx_buffer = [0; 4096];
+        let mut buf = [0; 4096];
+
         let mut socket = TcpSocket::new(stack, &mut rx_buffer, &mut tx_buffer);
         socket.set_timeout(Some(Duration::from_secs(10)));
 
@@ -146,29 +164,26 @@ async fn main(spawner: Spawner) {
 
         info!("Received connection from {:?}", socket.remote_endpoint());
         control.gpio_set(0, true).await;
-
-        loop {
-            let n = match socket.read(&mut buf).await {
-                Ok(0) => {
-                    warn!("read EOF");
-                    break;
-                }
-                Ok(n) => n,
-                Err(e) => {
-                    warn!("read error: {:?}", e);
-                    break;
-                }
-            };
-
-            info!("rxd {}", from_utf8(&buf[..n]).unwrap());
-
-            match socket.write_all(&buf[..n]).await {
-                Ok(()) => {}
-                Err(e) => {
-                    warn!("write error: {:?}", e);
-                    break;
-                }
-            };
+        let mut idx = 0;
+        loop {  
+            let read = match socket.read(&mut buf[idx..]).await {
+                Ok(d) => info!("Data Received:{:?}",d), 
+                Err(e) => info!("error! {:?}", e),
+//                Ok(0) => {
+//                    warn!("read EOF");
+//                    break;
+//                }
+//                Ok(idx) => idx,
+//                Err(e) => {
+//                    warn!("read error: {:?}", e);
+//                    break;
+                };
+//            idx += read;
+//            if read != 0 {
+//                decode_frame(buf,
+//            } 
+//            info!("rxd {}", from_utf8(&buf[..read]).unwrap());
+//            decode_buf(buf);        
         }
     }
 }

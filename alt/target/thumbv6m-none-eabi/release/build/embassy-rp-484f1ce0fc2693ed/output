@@ -1,3 +1,0 @@
-cargo:rustc-link-search=/Users/keegan/Msd/Capstone/pico_player/alt/target/thumbv6m-none-eabi/release/build/embassy-rp-484f1ce0fc2693ed/out
-cargo:rerun-if-changed=build.rs
-cargo:rerun-if-changed=link-rp.x.in

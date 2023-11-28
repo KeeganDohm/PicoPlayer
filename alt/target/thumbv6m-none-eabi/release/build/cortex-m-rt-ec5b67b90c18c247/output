@@ -1,5 +1,0 @@
-cargo:rustc-cfg=cortex_m
-cargo:rustc-cfg=armv6m
-cargo:rustc-link-search=/Users/keegan/Msd/Capstone/pico_player/alt/target/thumbv6m-none-eabi/release/build/cortex-m-rt-ec5b67b90c18c247/out
-cargo:rerun-if-changed=build.rs
-cargo:rerun-if-changed=link.x.in
