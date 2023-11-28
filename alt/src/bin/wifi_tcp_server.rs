@@ -22,7 +22,7 @@ use embassy_rp::pio::{InterruptHandler, Pio};
 use embassy_time::{Duration, Timer};
 use static_cell::make_static;
 use {defmt_rtt as _, panic_probe as _};
-
+use rmp3::{RawDecoder,Sample,MAX_SAMPLES_PER_FRAME,Frame};
 
 bind_interrupts!(struct Irqs {
     PIO0_IRQ_0 => InterruptHandler<PIO0>;
@@ -36,7 +36,11 @@ const WIFI_PASSWORD: &str = "ilovetea";
 
 #[embassy_executor::task]
 async fn wifi_task(
-    runner: cyw43::Runner<'static, Output<'static, PIN_23>, PioSpi<'static, PIN_25, PIO0, 0, DMA_CH0>>,
+    runner: cyw43::Runner<
+        'static,
+        Output<'static, PIN_23>,
+        PioSpi<'static, PIN_25, PIO0, 0, DMA_CH0>,
+    >,
 ) -> ! {
     runner.run().await
 }
@@ -47,18 +51,18 @@ async fn net_task(stack: &'static Stack<cyw43::NetDriver<'static>>) -> ! {
 }
 
 // #[embassy_executor::task]
-//fn decode_buf(buf: Buffer){ 
-    // need to check to see if the audio buffer has data in it
+//fn decode_buf(buf: Buffer){
+// need to check to see if the audio buffer has data in it
 //    let mut decoder = RawDecoder::new();
 //    let mut output_buf = [Sample::default(); MAX_SAMPLES_PER_FRAME];
-        // pseudocode
+// pseudocode
 //    while buf.
 //}
 
 //fn decode_frame(buf: Buffer, output_buf: &[Sample; MAX_SAMPLES_PER_FRAME])-> usize {
 //    if let (frame, bytes_consumed) = decoder.next(buf, &mut output_buf){
 //        buf.advance(bytes_consumed);
-//        frame
+//        framge
 //    }
 //}
 //fn decode_frame<'src, 'dst>(
@@ -68,23 +72,39 @@ async fn net_task(stack: &'static Stack<cyw43::NetDriver<'static>>) -> ! {
 //) -> (Frame<'src, 'dst>, usize) {
 //    RawDecoder::new().next(audio_buf, output_buf).unwrap()
 //}
-//fn decode_frame<'a>(start: usize, audio_buf: &'a [u8; 4096], output_buf: &'a mut [Sample; MAX_SAMPLES_PER_FRAME]) -> (Frame<'a, 'a>, usize) {
-//    
-//    let mut decoder = RawDecoder::new();
-//    let (frame, bytes_consumed) = decoder.next(audio_buf, output_buf).unwrap();
-//    return (frame, bytes_consumed);
-//}
 
+
+// Decoder test should compare local decoding of included bytes with local deocding of bytestream
+// received by TCP Socket
+//
+// Additional test should transmit decoded data back to client for comparison to data decoded by an
+// alternative decoder library.
+//
+// test one should only test usage of rmp3 on the chip!!
+//
+//
+//
+fn test_decoder(decoder: &mut RawDecoder, src_buf: &[u8]){ 
+    let mut dest = [Sample::default(); MAX_SAMPLES_PER_FRAME];
+    if let Some((frame, bytes_decoded)) = decoder.next(src_buf, &mut dest){
+        info!("Successful byte decoding!");    
+    }
+    else{
+        info!("ERROR: decoder does not work...");
+    }
+}
 #[embassy_executor::main]
 async fn main(spawner: Spawner) {
-    info!("Hello World!");
 
     let p = embassy_rp::init(Default::default());
-    let music = include_bytes!("../../../../pico_player_client/Mr_Blue_Sky-Electric_Light_Orchestra.mp3");
+    let music = include_bytes!("../../../../Mr_Blue_Sky-Electric_Light_Orchestra-trimmed.mp3");
 
     let fw = include_bytes!("../../../embassy/cyw43-firmware/43439A0.bin");
     let clm = include_bytes!("../../../embassy/cyw43-firmware/43439A0_clm.bin");
 
+    let mut decoder = RawDecoder::new();
+
+    test_decoder(&mut decoder, music);
     // To make flashing faster for development, you may want to flash the firmwares independently
     // at hardcoded addresses, instead of baking them into the program with `include_bytes!`:
     //     probe-rs download 43439A0.bin --format bin --chip RP2040 --base-address 0x10100000
@@ -95,7 +115,15 @@ async fn main(spawner: Spawner) {
     let pwr = Output::new(p.PIN_23, Level::Low);
     let cs = Output::new(p.PIN_25, Level::High);
     let mut pio = Pio::new(p.PIO0, Irqs);
-    let spi = PioSpi::new(&mut pio.common, pio.sm0, pio.irq0, cs, p.PIN_24, p.PIN_29, p.DMA_CH0);
+    let spi = PioSpi::new(
+        &mut pio.common,
+        pio.sm0,
+        pio.irq0,
+        cs,
+        p.PIN_24,
+        p.PIN_29,
+        p.DMA_CH0,
+    );
 
     let state = make_static!(cyw43::State::new());
     let (net_device, mut control, runner) = cyw43::new(state, pwr, spi, fw).await;
@@ -146,7 +174,6 @@ async fn main(spawner: Spawner) {
 
     // And now we can use it!
 
-
     loop {
         let mut rx_buffer = [0; 4096];
         let mut tx_buffer = [0; 4096];
@@ -161,29 +188,28 @@ async fn main(spawner: Spawner) {
             warn!("accept error: {:?}", e);
             continue;
         }
-
         info!("Received connection from {:?}", socket.remote_endpoint());
         control.gpio_set(0, true).await;
         let mut idx = 0;
-        loop {  
+        loop {
             let read = match socket.read(&mut buf[idx..]).await {
-                Ok(d) => info!("Data Received:{:?}",d), 
+                Ok(d) => info!("Data Received:{:?}", d),
                 Err(e) => info!("error! {:?}", e),
-//                Ok(0) => {
-//                    warn!("read EOF");
-//                    break;
-//                }
-//                Ok(idx) => idx,
-//                Err(e) => {
-//                    warn!("read error: {:?}", e);
-//                    break;
-                };
-//            idx += read;
-//            if read != 0 {
-//                decode_frame(buf,
-//            } 
-//            info!("rxd {}", from_utf8(&buf[..read]).unwrap());
-//            decode_buf(buf);        
+                //                Ok(0) => {
+                //                    warn!("read EOF");
+                //                    break;
+                //                }
+                //                Ok(idx) => idx,
+                //                Err(e) => {
+                //                    warn!("read error: {:?}", e);
+                //                    break;
+            };
+            //            idx += read;
+            //            if read != 0 {
+            //                decode_frame(buf,
+            //            }
+            //            info!("rxd {}", from_utf8(&buf[..read]).unwrap());
+            //            decode_buf(buf);
         }
     }
 }
