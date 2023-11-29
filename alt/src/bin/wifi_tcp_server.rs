@@ -9,7 +9,7 @@ extern crate alloc;
 use embedded_alloc::Heap;
 
 use alloc::vec::Vec;
-
+use core::str::from_utf8;
 use cyw43_pio::PioSpi;
 use defmt::*;
 use embassy_executor::Spawner;
@@ -50,30 +50,6 @@ async fn net_task(stack: &'static Stack<cyw43::NetDriver<'static>>) -> ! {
     stack.run().await
 }
 
-// #[embassy_executor::task]
-//fn decode_buf(buf: Buffer){
-// need to check to see if the audio buffer has data in it
-//    let mut decoder = RawDecoder::new();
-//    let mut output_buf = [Sample::default(); MAX_SAMPLES_PER_FRAME];
-// pseudocode
-//    while buf.
-//}
-
-//fn decode_frame(buf: Buffer, output_buf: &[Sample; MAX_SAMPLES_PER_FRAME])-> usize {
-//    if let (frame, bytes_consumed) = decoder.next(buf, &mut output_buf){
-//        buf.advance(bytes_consumed);
-//        framge
-//    }
-//}
-//fn decode_frame<'src, 'dst>(
-//    start: usize,
-//    audio_buf: &'src [u8; 4096],
-//    output_buf: &'dst mut [Sample; MAX_SAMPLES_PER_FRAME],
-//) -> (Frame<'src, 'dst>, usize) {
-//    RawDecoder::new().next(audio_buf, output_buf).unwrap()
-//}
-
-
 // Decoder test should compare local decoding of included bytes with local deocding of bytestream
 // received by TCP Socket
 //
@@ -81,18 +57,18 @@ async fn net_task(stack: &'static Stack<cyw43::NetDriver<'static>>) -> ! {
 // alternative decoder library.
 //
 // test one should only test usage of rmp3 on the chip!!
-//
-//
-//
+
+
 fn test_decoder(decoder: &mut RawDecoder, src_buf: &[u8]){ 
     let mut dest = [Sample::default(); MAX_SAMPLES_PER_FRAME];
-    if let Some((frame, bytes_decoded)) = decoder.next(src_buf, &mut dest){
+    if let Some((_frame, _bytes_decoded)) = decoder.next(src_buf, &mut dest){
         info!("Successful byte decoding!");    
     }
     else{
         info!("ERROR: decoder does not work...");
     }
 }
+
 #[embassy_executor::main]
 async fn main(spawner: Spawner) {
 
@@ -191,25 +167,34 @@ async fn main(spawner: Spawner) {
         info!("Received connection from {:?}", socket.remote_endpoint());
         control.gpio_set(0, true).await;
         let mut idx = 0;
+
         loop {
             let read = match socket.read(&mut buf[idx..]).await {
-                Ok(d) => info!("Data Received:{:?}", d),
-                Err(e) => info!("error! {:?}", e),
-                //                Ok(0) => {
-                //                    warn!("read EOF");
-                //                    break;
-                //                }
-                //                Ok(idx) => idx,
-                //                Err(e) => {
-                //                    warn!("read error: {:?}", e);
-                //                    break;
+                Ok(0) => {
+                    info!("Reached EOF!");
+                    break;
+                },
+                Ok(d) => {
+                    info!("Received {:?} bytes", d);
+                    info!("{:?}", buf);
+                    d
+                },
+                Err(e) => {
+                    info!("error! {:?}", e);
+                    0
+                },
+
             };
-            //            idx += read;
-            //            if read != 0 {
-            //                decode_frame(buf,
-            //            }
-            //            info!("rxd {}", from_utf8(&buf[..read]).unwrap());
-            //            decode_buf(buf);
+            idx = idx + read;
+            info!("Getting utf8");
+            let utf8 = from_utf8(&buf[..idx]);
+            info!("Matching utf8");
+            match utf8 {
+                Ok(content) => {
+                    info!("rxd {}", content);
+                },
+                Err(_) => warn!("bytes are not utf8?"),
+            }
         }
     }
 }
