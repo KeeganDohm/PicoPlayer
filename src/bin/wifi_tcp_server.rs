@@ -34,17 +34,17 @@ static HEAP: Heap = Heap::empty();
 static QUEUE: Queue = Queue::new();
 use core::sync::atomic::{AtomicBool, Ordering};
 
-struct Queue<'a>{
+struct Queue{
     queue: BBBuffer<102400>,
-    producer: Producer<'a, 51200>,
-    consumer: Consumer<'a, 51200>,
+    producer: Producer<'static, 51200>,
+    consumer: Consumer<'static, 51200>,
     queue_lock: AtomicBool, // Lock for queue field
     producer_lock: AtomicBool, // Lock for producer field
     consumer_lock: AtomicBool, // Lock for consumer field
 }
 
-impl<'a> Queue<'a> {
-    pub fn new() -> Result<Self, io::Error> {
+impl Queue {
+    pub fn new() -> Result<Self, u8> {
         let mut bb_buffer: BBBuffer<102400> = BBBuffer::new();
         let (prod, cons) = bb_buffer.try_split().unwrap();
         Ok(Self {
