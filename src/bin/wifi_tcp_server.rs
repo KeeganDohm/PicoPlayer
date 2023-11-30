@@ -31,56 +31,27 @@ bind_interrupts!(struct Irqs {
 
 #[global_allocator]
 static HEAP: Heap = Heap::empty();
-static QUEUE: Queue = Queue::new().unwrap();
-use core::sync::atomic::{AtomicBool, Ordering};
 
-struct Queue{
-    queue: BBBuffer<102400>,
-    producer: Producer<'static, 51200>,
-    consumer: Consumer<'static, 51200>,
-    queue_lock: AtomicBool, // Lock for queue field
-    producer_lock: AtomicBool, // Lock for producer field
-    consumer_lock: AtomicBool, // Lock for consumer field
-}
+static QUEUE: BBBuffer<102400> = BBBuffer::new();
+// struct Queue{
+//     queue: BBBuffer<102400>,
+//     producer: Producer<'static, 102400>,
+//     consumer: Consumer<'static, 102400>,
+// }
 
-impl Queue {
-    pub fn new() -> Result<Self, u8> {
-        let mut bb_buffer: BBBuffer<102400> = BBBuffer::new();
-        let (prod, cons) = bb_buffer.try_split().unwrap();
-        Ok(Self {
-            queue: bb_buffer,
-            producer: prod,
-            consumer: cons,
-            queue_lock: AtomicBool::new(false),
-            producer_lock: AtomicBool::new(false),
-            consumer_lock: AtomicBool::new(false),
-        })
-    }
+// impl Queue {
+//     pub fn new() -> Result<Self, u8> {
+//         let mut bb_buffer: BBBuffer<102400> = BBBuffer::new();
+//         let (prod, cons) = bb_buffer.try_split().unwrap();
+//         Ok(Self {
+//             queue: bb_buffer,
+//             producer: prod,
+//             consumer: cons,
+//         })
+//     }
+// }
 
-    pub fn access_queue(&self) {
-        while self.queue_lock.compare_and_swap(false, true, Ordering::Acquire) != false {
-            // Wait or retry until the lock is acquired
-        }
-        // Access the queue field here
-        self.queue_lock.store(false, Ordering::Release);
-    }
-
-    pub fn access_producer(&self) {
-        while self.producer_lock.compare_and_swap(false, true, Ordering::Acquire) != false {
-            // Wait or retry until the lock is acquired
-        }
-        // Access the producer field here
-        self.producer_lock.store(false, Ordering::Release);
-    }
-
-    pub fn access_consumer(&self) {
-        while self.consumer_lock.compare_and_swap(false, true, Ordering::Acquire) != false {
-            // Wait or retry until the lock is acquired
-        }
-        // Access the consumer field here
-        self.consumer_lock.store(false, Ordering::Release);
-    }
-}const WIFI_NETWORK: &str = "TZ Guest";
+const WIFI_NETWORK: &str = "TZ Guest";
 const WIFI_PASSWORD: &str = "ilovetea";
 
 #[embassy_executor::task]
@@ -108,27 +79,33 @@ async fn net_task(stack: &'static Stack<cyw43::NetDriver<'static>>) -> ! {
 // test one should only test usage of rmp3 on the chip!!
 
 
-fn test_decoder(decoder: &mut RawDecoder, src_buf: &[u8]){ 
+fn test_decoder<'a>(decoder: &mut RawDecoder, src_buf: &'a [u8]) -> Result<(Frame<'a, '_>, usize), u8> {
     let mut dest = [Sample::default(); MAX_SAMPLES_PER_FRAME];
-    if let Some((_frame, _bytes_decoded)) = decoder.next(src_buf, &mut dest){
-        info!("Successful byte decoding!");    
-    }
-    else{
-        info!("ERROR: decoder does not work...");
-    }
-}
-#[embassy_executor::task]
-async fn queue_checker(){
-    {
-        loop{
-            let grant = QUEUE.consumer.read().unwrap();
+    match decoder.next(src_buf, &mut dest){
+        Some(f)=> {
+            info!("Successful byte decoding!");
+            Ok(f)
+        }
+        None => {
+            info!("ERROR: decoder does not work...");
+            Err(0) // Wrapping error value in Err()
         }
     }
-
 }
+
+#[embassy_executor::task]
+async fn queue_checker(mut consumer: Consumer<'static,102400>){
+    {
+        loop{
+            let read_buf = consumer.read().unwrap();
+            let mut raw_decoder = RawDecoder::new();
+            test_decoder(&mut raw_decoder,&read_buf);
+        }
+    }
+}
+
 #[embassy_executor::main]
 async fn main(spawner: Spawner) {
-
     let p = embassy_rp::init(Default::default());
     let music = include_bytes!("../../../Mr_Blue_Sky-Electric_Light_Orchestra-trimmed.mp3");
 
@@ -137,7 +114,7 @@ async fn main(spawner: Spawner) {
 
     let mut decoder = RawDecoder::new();
 
-    test_decoder(&mut decoder, music);
+    // test_decoder::<'a>(&mut decoder, music);
     // To make flashing faster for development, you may want to flash the firmwares independently
     // at hardcoded addresses, instead of baking them into the program with `include_bytes!`:
     //     probe-rs download 43439A0.bin --format bin --chip RP2040 --base-address 0x10100000
@@ -211,8 +188,9 @@ async fn main(spawner: Spawner) {
         let mut rx_buffer = [0; 4096];
         let mut tx_buffer = [0; 4096];
         let mut buf = [0; 4096];
-        let mut queue: Queue = Queue::new().unwrap();
-
+        // let mut queue: Queue = Queue::new().unwrap();
+        let (mut prod, cons) = QUEUE.try_split().unwrap();
+        unwrap!(spawner.spawn(queue_checker(cons)));
 
         let mut socket = TcpSocket::new(stack, &mut rx_buffer, &mut tx_buffer);
         socket.set_timeout(Some(Duration::from_secs(10)));
@@ -227,13 +205,13 @@ async fn main(spawner: Spawner) {
         control.gpio_set(0, true).await;
 
         loop {
-            let read = match socket.read(&mut buf[idx..]).await {
+            let read = match socket.read(&mut buf).await {
                 Ok(0) => {
                     info!("Read EOF!");
                     break;
                 },
                 Ok(d) => {
-                    let mut grant = decoding_buf_wx.grant_exact(d).unwrap();
+                    let mut grant = prod.grant_exact(d).unwrap();
                     grant.buf().copy_from_slice(&buf[..d]);
                     grant.commit(d); 
                     info!("Received {:?} bytes", d);
