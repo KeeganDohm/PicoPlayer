@@ -55,6 +55,7 @@ pio = "0.2.1"
 rand = { version = "0.8.5", default-features = false }
 rmp3 = { path = "../etc/rmp3" }
 embedded-alloc = "0.5.1"
+bbqueue = { version = "0.5.1", features = ["thumbv6"] }
 [profile.release]
 debug = 2
 [target.'cfg(target_arch = "arm")']
