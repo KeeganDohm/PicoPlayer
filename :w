@@ -31,56 +31,24 @@ bind_interrupts!(struct Irqs {
 
 #[global_allocator]
 static HEAP: Heap = Heap::empty();
-static QUEUE: Queue = Queue::new().unwrap();
-use core::sync::atomic::{AtomicBool, Ordering};
-
-struct Queue<'a> {
+static QUEUE: Queue = Queue::new();
+struct Queue<'a>{
     queue: BBBuffer<102400>,
-    producer: Producer<'a, 51200>,
-    consumer: Consumer<'a, 51200>,
-    queue_lock: AtomicBool, // Lock for queue field
-    producer_lock: AtomicBool, // Lock for producer field
-    consumer_lock: AtomicBool, // Lock for consumer field
+    producer: Producer,
+    consumer: 'a Consumer,
 }
-
-impl<'a> Queue<'a> {
-    pub fn new() -> Result<Self, u8> {
+impl Queue{
+    pub fn new(&self,size: usize)->Result<Self,u8>{
         let mut bb_buffer: BBBuffer<102400> = BBBuffer::new();
-        let (prod, cons) = bb_buffer.try_split().unwrap();
-        Ok(Self {
+        let (mut prod, mut cons) = bb_buffer.try_split().unwrap();
+        Ok(Self{
             queue: bb_buffer,
             producer: prod,
             consumer: cons,
-            queue_lock: AtomicBool::new(false),
-            producer_lock: AtomicBool::new(false),
-            consumer_lock: AtomicBool::new(false),
         })
     }
-
-    pub fn access_queue(&self) {
-        while self.queue_lock.compare_and_swap(false, true, Ordering::Acquire) != false {
-            // Wait or retry until the lock is acquired
-        }
-        // Access the queue field here
-        self.queue_lock.store(false, Ordering::Release);
-    }
-
-    pub fn access_producer(&self) {
-        while self.producer_lock.compare_and_swap(false, true, Ordering::Acquire) != false {
-            // Wait or retry until the lock is acquired
-        }
-        // Access the producer field here
-        self.producer_lock.store(false, Ordering::Release);
-    }
-
-    pub fn access_consumer(&self) {
-        while self.consumer_lock.compare_and_swap(false, true, Ordering::Acquire) != false {
-            // Wait or retry until the lock is acquired
-        }
-        // Access the consumer field here
-        self.consumer_lock.store(false, Ordering::Release);
-    }
-}const WIFI_NETWORK: &str = "TZ Guest";
+}
+const WIFI_NETWORK: &str = "TZ Guest";
 const WIFI_PASSWORD: &str = "ilovetea";
 
 #[embassy_executor::task]
