@@ -31,7 +31,7 @@ bind_interrupts!(struct Irqs {
 
 #[global_allocator]
 static HEAP: Heap = Heap::empty();
-static QUEUE: Queue = Queue::new();
+static QUEUE: Queue = Queue::new().unwrap();
 use core::sync::atomic::{AtomicBool, Ordering};
 
 struct Queue{
@@ -118,10 +118,10 @@ fn test_decoder(decoder: &mut RawDecoder, src_buf: &[u8]){
     }
 }
 #[embassy_executor::task]
-async fn queue_checker(consumer: &Consumer<'static,51200>){
+async fn queue_checker(){
     {
         loop{
-            let grant = consumer.grant(1).await;
+            let grant = QUEUE.consumer.read().unwrap();
         }
     }
 
@@ -211,9 +211,7 @@ async fn main(spawner: Spawner) {
         let mut rx_buffer = [0; 4096];
         let mut tx_buffer = [0; 4096];
         let mut buf = [0; 4096];
-        let mut queue: Queue<102400> = Queue::new();
-        info!("Splitting Queue!");
-        let (mut decoding_buf_wx, mut decoding_buf_rx) = queue.try_split().unwrap();
+        let mut queue: Queue = Queue::new().unwrap();
 
 
         let mut socket = TcpSocket::new(stack, &mut rx_buffer, &mut tx_buffer);
