@@ -23,7 +23,7 @@ use embassy_time::{Duration, Timer};
 use static_cell::make_static;
 use {defmt_rtt as _, panic_probe as _};
 use rmp3::{RawDecoder,Sample,MAX_SAMPLES_PER_FRAME,Frame};
-
+use bbqueue::BBBuffer as queue;
 bind_interrupts!(struct Irqs {
     PIO0_IRQ_0 => InterruptHandler<PIO0>;
 });
