@@ -31,10 +31,10 @@ bind_interrupts!(struct Irqs {
 
 #[global_allocator]
 static HEAP: Heap = Heap::empty();
-static QUEUE: Queue = Queue::new().unwrap();
+static QUEUE: Queue = Queue::new();
 use core::sync::atomic::{AtomicBool, Ordering};
 
-struct Queue<'a> {
+struct Queue<'a>{
     queue: BBBuffer<102400>,
     producer: Producer<'a, 51200>,
     consumer: Consumer<'a, 51200>,
@@ -44,7 +44,7 @@ struct Queue<'a> {
 }
 
 impl<'a> Queue<'a> {
-    pub fn new() -> Result<Self, u8> {
+    pub fn new() -> Result<Self, io::Error> {
         let mut bb_buffer: BBBuffer<102400> = BBBuffer::new();
         let (prod, cons) = bb_buffer.try_split().unwrap();
         Ok(Self {
@@ -118,12 +118,10 @@ fn test_decoder(decoder: &mut RawDecoder, src_buf: &[u8]){
     }
 }
 #[embassy_executor::task]
-async fn queue_checker(){
+async fn queue_checker(consumer: &Consumer<'static,51200>){
     {
         loop{
-
             let grant = consumer.grant(1).await;
-        
         }
     }
 
