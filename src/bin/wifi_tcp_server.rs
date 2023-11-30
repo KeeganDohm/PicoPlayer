@@ -1,18 +1,15 @@
-// PicoPlayer Firmware
-// Author: Keegan Dohm
-//
-
-//! This example uses the RP Pico W board Wifi chip (cyw43).
-//! Connects to specified Wifi network and creates a TCP endpoint on port 1234.
-
 #![no_std]
 #![no_main]
 #![feature(type_alias_impl_trait)]
 #![feature(async_fn_in_trait)]
 #![allow(stable_features, unknown_lints, async_fn_in_trait)]
+#![feature(alloc)]
 
+extern crate alloc;
+use embedded_alloc::Heap;
+
+use alloc::vec::Vec;
 use core::str::from_utf8;
-
 use cyw43_pio::PioSpi;
 use defmt::*;
 use embassy_executor::Spawner;
@@ -23,16 +20,19 @@ use embassy_rp::gpio::{Level, Output};
 use embassy_rp::peripherals::{DMA_CH0, PIN_23, PIN_25, PIO0};
 use embassy_rp::pio::{InterruptHandler, Pio};
 use embassy_time::{Duration, Timer};
-use embedded_io_async::Write;
 use static_cell::make_static;
 use {defmt_rtt as _, panic_probe as _};
-use rmp3::{RawDecoder,Sample,MAX_SAMPLES_PER_FRAME}
+use rmp3::{RawDecoder,Sample,MAX_SAMPLES_PER_FRAME,Frame};
+
 bind_interrupts!(struct Irqs {
     PIO0_IRQ_0 => InterruptHandler<PIO0>;
 });
 
-const WIFI_NETWORK: &str = "TPL";
-const WIFI_PASSWORD: &str = "icantd55";
+#[global_allocator]
+static HEAP: Heap = Heap::empty();
+
+const WIFI_NETWORK: &str = "TZ Guest";
+const WIFI_PASSWORD: &str = "ilovetea";
 
 #[embassy_executor::task]
 async fn wifi_task(
@@ -50,21 +50,43 @@ async fn net_task(stack: &'static Stack<cyw43::NetDriver<'static>>) -> ! {
     stack.run().await
 }
 
+// Decoder test should compare local decoding of included bytes with local deocding of bytestream
+// received by TCP Socket
+//
+// Additional test should transmit decoded data back to client for comparison to data decoded by an
+// alternative decoder library.
+//
+// test one should only test usage of rmp3 on the chip!!
+
+
+fn test_decoder(decoder: &mut RawDecoder, src_buf: &[u8]){ 
+    let mut dest = [Sample::default(); MAX_SAMPLES_PER_FRAME];
+    if let Some((_frame, _bytes_decoded)) = decoder.next(src_buf, &mut dest){
+        info!("Successful byte decoding!");    
+    }
+    else{
+        info!("ERROR: decoder does not work...");
+    }
+}
+
 #[embassy_executor::main]
 async fn main(spawner: Spawner) {
-    info!("Hello World!");
 
     let p = embassy_rp::init(Default::default());
+    let music = include_bytes!("../../../Mr_Blue_Sky-Electric_Light_Orchestra-trimmed.mp3");
 
-    let fw = include_bytes!("../../../../cyw43-firmware/43439A0.bin");
-    let clm = include_bytes!("../../../../cyw43-firmware/43439A0_clm.bin");
+    let fw = include_bytes!("../../embassy/cyw43-firmware/43439A0.bin");
+    let clm = include_bytes!("../../embassy/cyw43-firmware/43439A0_clm.bin");
 
+    let mut decoder = RawDecoder::new();
+
+    test_decoder(&mut decoder, music);
     // To make flashing faster for development, you may want to flash the firmwares independently
     // at hardcoded addresses, instead of baking them into the program with `include_bytes!`:
     //     probe-rs download 43439A0.bin --format bin --chip RP2040 --base-address 0x10100000
     //     probe-rs download 43439A0_clm.bin --format bin --chip RP2040 --base-address 0x10140000
-    //let fw = unsafe { core::slice::from_raw_parts(0x10100000 as *const u8, 230321) };
-    //let clm = unsafe { core::slice::from_raw_parts(0x10140000 as *const u8, 4752) };
+    // let fw = unsafe { core::slice::from_raw_parts(0x10100000 as *const u8, 230321) };
+    // let clm = unsafe { core::slice::from_raw_parts(0x10140000 as *const u8, 4752) };
 
     let pwr = Output::new(p.PIN_23, Level::Low);
     let cs = Output::new(p.PIN_25, Level::High);
@@ -97,6 +119,7 @@ async fn main(spawner: Spawner) {
 
     // Generate random seed
     let seed = 0x0123_4567_89ab_cdef; // chosen by fair dice roll. guarenteed to be random.
+    let _vec: Vec<i32> = Vec::new();
 
     // Init network stack
     let stack = &*make_static!(Stack::new(
@@ -109,7 +132,7 @@ async fn main(spawner: Spawner) {
     unwrap!(spawner.spawn(net_task(stack)));
 
     loop {
-        //control.join_open(WIFI_NETWORK).await;
+        // control.join_open(WIFI_NETWORK).await;
         match control.join_wpa2(WIFI_NETWORK, WIFI_PASSWORD).await {
             Ok(_) => break,
             Err(err) => {
@@ -127,11 +150,11 @@ async fn main(spawner: Spawner) {
 
     // And now we can use it!
 
-    let mut rx_buffer = [0; 4096];
-    let mut tx_buffer = [0; 4096];
-    let mut buf = [0; 4096];
-
     loop {
+        let mut rx_buffer = [0; 4096];
+        let mut tx_buffer = [0; 4096];
+        let mut buf = [0; 4096];
+
         let mut socket = TcpSocket::new(stack, &mut rx_buffer, &mut tx_buffer);
         socket.set_timeout(Some(Duration::from_secs(10)));
 
@@ -141,32 +164,37 @@ async fn main(spawner: Spawner) {
             warn!("accept error: {:?}", e);
             continue;
         }
-
         info!("Received connection from {:?}", socket.remote_endpoint());
         control.gpio_set(0, true).await;
+        let mut idx = 0;
 
         loop {
-            let n = match socket.read(&mut buf).await {
+            let read = match socket.read(&mut buf[idx..]).await {
                 Ok(0) => {
-                    warn!("read EOF");
+                    info!("Reached EOF!");
                     break;
-                }
-                Ok(n) => n,
+                },
+                Ok(d) => {
+                    info!("Received {:?} bytes", d);
+                    info!("{:?}", buf);
+                    d
+                },
                 Err(e) => {
-                    warn!("read error: {:?}", e);
-                    break;
-                }
-            };
+                    info!("error! {:?}", e);
+                    0
+                },
 
-            info!("rxd {}", from_utf8(&buf[..n]).unwrap());
-
-            match socket.write_all(&buf[..n]).await {
-                Ok(()) => {}
-                Err(e) => {
-                    warn!("write error: {:?}", e);
-                    break;
-                }
             };
+            idx = idx + read;
+            info!("Getting utf8");
+            let utf8 = from_utf8(&buf[..idx]);
+            info!("Matching utf8");
+            match utf8 {
+                Ok(content) => {
+                    info!("rxd {}", content);
+                },
+                Err(_) => warn!("bytes are not utf8?"),
+            }
         }
     }
 }
