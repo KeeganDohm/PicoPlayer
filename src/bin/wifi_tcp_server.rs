@@ -90,16 +90,26 @@ async fn queue_checker(mut decode_consumer: Consumer<'static,102400>, mut play_p
         test_decoder(&mut play_producer, &mut raw_decoder,&read_buf); 
     }
 }
+#[embassy_executor::task]
+async fn output_audio(mut play_consumer: Consumer<'static, 102400>){
+   loop{
+        let read_buf = play_consumer.read().unwrap();
+        let mut play_buf = [0u8; MAX_SAMPLES_PER_FRAME * 2];
+        play_buf.copy_from_slice(&read_buf[..MAX_SAMPLES_PER_FRAME*2]);
+        read_buf.release(MAX_SAMPLES_PER_FRAME*2);
+        let play_buf: [Sample; MAX_SAMPLES_PER_FRAME] = unsafe {transmute(play_buf)};
+         
+    } 
+}
 
 #[embassy_executor::main]
 async fn main(spawner: Spawner) {
     let p = embassy_rp::init(Default::default());
-    let music = include_bytes!("../../../Mr_Blue_Sky-Electric_Light_Orchestra-trimmed.mp3");
+    // let music = include_bytes!("../../../Mr_Blue_Sky-Electric_Light_Orchestra-trimmed.mp3");
 
     let fw = include_bytes!("../../embassy/cyw43-firmware/43439A0.bin");
     let clm = include_bytes!("../../embassy/cyw43-firmware/43439A0_clm.bin");
 
-    let mut decoder = RawDecoder::new();
 
     // test_decoder::<'a>(&mut decoder, music);
     // To make flashing faster for development, you may want to flash the firmwares independently
@@ -175,15 +185,18 @@ async fn main(spawner: Spawner) {
         let mut rx_buffer = [0; 4096];
         let mut tx_buffer = [0; 4096];
         let mut buf = [0; 4096];
-        // let mut queue: Queue = Queue::new().unwrap();
-        let (mut prod, cons) = DECODE_QUEUE.try_split().unwrap();
-        unwrap!(spawner.spawn(queue_checker(cons)));
+
+        let (mut decode_prod, decode_cons) = DECODE_QUEUE.try_split().unwrap();
+        let (mut play_prod, play_cons) = PLAY_QUEUE.try_split().unwrap();
+
+        unwrap!(spawner.spawn(queue_checker(decode_cons, play_prod)));
 
         let mut socket = TcpSocket::new(stack, &mut rx_buffer, &mut tx_buffer);
         socket.set_timeout(Some(Duration::from_secs(10)));
 
         control.gpio_set(0, false).await;
         info!("Listening on TCP:1234...");
+        // On error warn and continue
         if let Err(e) = socket.accept(1234).await {
             warn!("accept error: {:?}", e);
             continue;
@@ -198,7 +211,7 @@ async fn main(spawner: Spawner) {
                     break;
                 },
                 Ok(d) => {
-                    let mut grant = prod.grant_exact(d).unwrap();
+                    let mut grant = decode_prod.grant_exact(d).unwrap();
                     grant.buf().copy_from_slice(&buf[..d]);
                     grant.commit(d); 
                     info!("Received {:?} bytes", d);
