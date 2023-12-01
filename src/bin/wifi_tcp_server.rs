@@ -71,15 +71,12 @@ async fn net_task(stack: &'static Stack<cyw43::NetDriver<'static>>) -> ! {
 // test one should only test usage of rmp3 on the chip!!
 
 fn enqueue_frame_size(producer: &mut Producer<'static, BUFFER_SIZE>, size: usize) {
-    match producer.grant_exact(1){
-        Ok(mut grant_w) => {
-            let frame_size: [u8; 4] = unsafe { transmute([size]) };
-            grant_w.buf().copy_from_slice(&frame_size);
-            grant_w.commit(4);
-        },
-        Err(_) => info!("Error enqueueing 'frame_size'"),
+    if let Ok(mut grant_w) = producer.grant_exact(1){
+        let frame_size: [u8; 4] = unsafe { transmute([size]) };
+        grant_w.buf().copy_from_slice(&frame_size);
+        grant_w.commit(4);
     }
-   }
+}
 
 fn enqueue_frame(
     producer: &mut Producer<'static, BUFFER_SIZE>,
@@ -87,12 +84,9 @@ fn enqueue_frame(
     buf: [Sample; MAX_SAMPLES_PER_FRAME],
 ) {
     let dest: [u8; MAX_SAMPLES_PER_FRAME * 2] = unsafe { transmute(buf) };
-    match producer.grant_exact(size) {
-        Ok(mut frame_grant) =>{     
-            frame_grant.buf().copy_from_slice(&dest[..size]);
-            frame_grant.commit(size);
-        },
-        Err(_) => info!(""),
+    if let Ok(mut frame_grant) = producer.grant_exact(size) {
+        frame_grant.buf().copy_from_slice(&dest[..size]);
+        frame_grant.commit(size);
     }
 }
 
