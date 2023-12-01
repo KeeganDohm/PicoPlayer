@@ -5,6 +5,7 @@
 #![allow(stable_features, unknown_lints, async_fn_in_trait)]
 #![feature(alloc)]
 
+use embedded_alloc::Heap;
 extern crate alloc;
 use alloc::vec::Vec;
 use core::mem::transmute;
