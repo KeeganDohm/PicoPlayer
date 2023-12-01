@@ -9,6 +9,7 @@ extern crate alloc;
 use alloc::vec::Vec;
 use bbqueue::BBBuffer;
 use bbqueue::{Consumer, GrantR, Producer};
+use log::info;
 use core::mem::transmute;
 use core::slice::ChunksExact;
 use cyw43::Control;
@@ -142,7 +143,8 @@ async fn play_task(mut control: Control<'static>, mut consumer: Consumer<'static
     loop{
         Timer::after_micros(0).await;
         let frame_size: usize = dequeue_frame_size(&mut consumer); // should branch on 0
-        if let Ok(grant_r) = consumer.read(){       
+        if let Ok(grant_r) = consumer.read(){
+            info!("MADE IT INTO PLAY LOOP!");
             led_on = true;
             for sample in grant_r.chunks_exact(2) {
                 let sample: [Sample;1] = unsafe{transmute([sample[0],sample[1]])};
@@ -155,6 +157,7 @@ async fn play_task(mut control: Control<'static>, mut consumer: Consumer<'static
         }
         else{
             if led_on{
+                info!("TURNING OFF LED");
                 control.gpio_set(0, false).await;
                 led_on = false;
             }
@@ -202,8 +205,8 @@ async fn main(spawner: Spawner) {
     let state = make_static!(cyw43::State::new());
     let (net_device, mut control, runner) = cyw43::new(state, pwr, spi, fw).await;
 
-    unwrap!(spawner.spawn(wifi_task(runner)));
     info!("STARTING WIFI_TASK");
+    unwrap!(spawner.spawn(wifi_task(runner)));
     control.init(clm).await;
     control
         .set_power_management(cyw43::PowerManagementMode::PowerSave)
@@ -227,7 +230,7 @@ async fn main(spawner: Spawner) {
         make_static!(StackResources::<2>::new()),
         seed
     ));
-
+    info!("init net_task");
     unwrap!(spawner.spawn(net_task(stack)));
 
     loop {
@@ -249,8 +252,8 @@ async fn main(spawner: Spawner) {
 
     // And now we can use it!
 
-    unwrap!(spawner.spawn(decode_task(decode_consumer, play_producer)));
-    unwrap!(spawner.spawn(play_task(control, play_consumer )));
+    // unwrap!(spawner.spawn(decode_task(decode_consumer, play_producer)));
+    // unwrap!(spawner.spawn(play_task(control, play_consumer )));
     loop {
         let mut rx_buffer = [0; 4096];
         let mut tx_buffer = [0; 4096];
