@@ -27,7 +27,7 @@ use bbqueue::BBBuffer;
 use bbqueue::{Producer,Consumer,GrantR,GrantW};
 
 #[global_allocator]
-static HEAP: Heap = Heap::new();
+static HEAP: Heap = Heap::empty();
 
 const SAMPLE_RATE: usize = 8000; // 8-24KHz
 const BIT_RATE: usize = 64; // 64 Bit/s
@@ -65,14 +65,14 @@ async fn net_task(stack: &'static Stack<cyw43::NetDriver<'static>>) -> ! {
 //
 // test one should only test usage of rmp3 on the chip!!
 
-fn enqueue_frame_size(producer: &Producer<'static, 102400>, size: usize){
+fn enqueue_frame_size(producer: &mut Producer<'static, 102400>, size: usize){
     let mut grant_w = producer.grant_exact(1).unwrap();
     let frame_size: [u8; 4] = unsafe { transmute([size]) };
     grant_w.buf().copy_from_slice(&frame_size);
     grant_w.commit(4);
 }
 
-fn enqueue_frame(producer: &Producer<'static, 102400>,size:usize, buf: [Sample;MAX_SAMPLES_PER_FRAME]){
+fn enqueue_frame(producer: &mut Producer<'static, 102400>,size:usize, buf: [Sample;MAX_SAMPLES_PER_FRAME]){
     let dest: [u8; MAX_SAMPLES_PER_FRAME * 2] = unsafe { transmute(buf) };
     let mut frame_grant = producer.grant_exact(size).unwrap();
     frame_grant.buf().copy_from_slice(&dest[..size]);
@@ -80,15 +80,15 @@ fn enqueue_frame(producer: &Producer<'static, 102400>,size:usize, buf: [Sample;M
 }
 
 fn decode_queue(
-    producer: &Producer<'static, 102400>,
+    producer: &mut Producer<'static, 102400>,
     src_buf: &[u8],
 )->Result<usize,u8> {
     let mut dest = [Sample::default(); MAX_SAMPLES_PER_FRAME];
     let mut decoder = RawDecoder::new();
     match decoder.next(src_buf, &mut dest) {
         Some((_frame, size)) => {
-            enqueue_frame_size(&producer, size);
-            enqueue_frame(&producer, size,dest);  
+            enqueue_frame_size(producer, size);
+            enqueue_frame(producer, size,dest);  
             Ok(size)
         }
         None => {
@@ -110,7 +110,7 @@ async fn decode_task(mut consumer: Consumer<'static, 102400>, mut producer: Prod
         }
     }
 }
-fn dequeue_frame_size(consumer: & Consumer<'static, 102400>)->usize{
+fn dequeue_frame_size(consumer: &mut Consumer<'static, 102400>)->usize{
     let grant_r = consumer.read().unwrap();
     let mut header = [0u8;4];
     header.copy_from_slice(&grant_r[..3]);
@@ -126,7 +126,7 @@ fn dequeue_sample(grant_r: & GrantR<'static,102400>,i:usize)->[Sample; 1]{
 
 #[embassy_executor::task]
 async fn play_task(mut control: Control<'static>, mut consumer: Consumer<'static, 102400>){
-    let frame_size: usize = dequeue_frame_size(& consumer);
+    let frame_size: usize = dequeue_frame_size(&mut consumer);
     let read_buf = consumer.read().unwrap();
     for i in 0..frame_size{
         let sample = dequeue_sample(&read_buf, i+2);
