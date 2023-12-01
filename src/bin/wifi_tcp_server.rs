@@ -84,9 +84,9 @@ fn enqueue_frame(
     buf: [Sample; MAX_SAMPLES_PER_FRAME],
 ) {
     let dest: [u8; MAX_SAMPLES_PER_FRAME * 2] = unsafe { transmute(buf) };
-    if let Ok(mut frame_grant) = producer.grant_exact(size) {
-        frame_grant.buf().copy_from_slice(&dest[..size]);
-        frame_grant.commit(size);
+    if let Ok(mut grant_w) = producer.grant_exact(size) {
+        grant_w.buf().copy_from_slice(&dest[..size]);
+        grant_w.commit(size);
     }
 }
 
@@ -110,6 +110,7 @@ async fn decode_task(
     mut consumer: Consumer<'static, BUFFER_SIZE>,
     mut producer: Producer<'static, BUFFER_SIZE>,
 ) {
+    info!("STARTING DECODE_TASK");
     loop {
         if let Ok(grant_r) = consumer.read(){
             match decode_queue(&mut producer, &grant_r) {
@@ -135,7 +136,7 @@ fn dequeue_frame_size(consumer: &mut Consumer<'static, BUFFER_SIZE>) -> usize {
 
 #[embassy_executor::task]
 async fn play_task(mut control: Control<'static>, mut consumer: Consumer<'static, BUFFER_SIZE>) {
-
+    info!("STARTING PLAY_TASK");
     //check queue status first
     loop{
         let frame_size: usize = dequeue_frame_size(&mut consumer); // should branch on 0
@@ -161,6 +162,7 @@ fn enqueue_bytes(producer: &mut Producer<'static, BUFFER_SIZE>,buf: &[u8;4096], 
 
 #[embassy_executor::main]
 async fn main(spawner: Spawner) {
+    info!("PROGRAM START");
     let p = embassy_rp::init(Default::default());
     let (mut decode_producer, decode_consumer) = DECODE_QUEUE.try_split().unwrap();
     let (play_producer, play_consumer) = PLAY_QUEUE.try_split().unwrap();
@@ -191,8 +193,9 @@ async fn main(spawner: Spawner) {
 
     let state = make_static!(cyw43::State::new());
     let (net_device, mut control, runner) = cyw43::new(state, pwr, spi, fw).await;
-    unwrap!(spawner.spawn(wifi_task(runner)));
 
+    unwrap!(spawner.spawn(wifi_task(runner)));
+    info!("STARTING WIFI_TASK");
     control.init(clm).await;
     control
         .set_power_management(cyw43::PowerManagementMode::PowerSave)
