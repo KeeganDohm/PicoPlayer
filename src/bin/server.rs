@@ -20,8 +20,6 @@ use embassy_rp::gpio::{Level, Output};
 use embassy_rp::peripherals::{DMA_CH0, PIN_23, PIN_25, PIO0};
 use embassy_rp::pio::{InterruptHandler, Pio};
 use embassy_time::{Duration, Timer};
+use rmp3::{Frame, RawDecoder, Sample, MAX_SAMPLES_PER_FRAME};
 use static_cell::make_static;
 use {defmt_rtt as _, panic_probe as _};
-use rmp3::{RawDecoder,Sample,MAX_SAMPLES_PER_FRAME,Frame};
-
-

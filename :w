@@ -127,7 +127,13 @@ fn dequeue_frame_size(consumer: &mut Consumer<'static, 102400>) -> usize {
         },
     }
 }
-
+fn dequeue_sample<'a>(iter: &mut ChunksExact<'a,u8>) -> [Sample; 1] {
+    let mut sample = [0u8; 2];
+    let mut iter = grant_r.chunks_exact(2);
+    sample.copy_from_slice(iter.next().unwrap());
+    let sample: [Sample; 1] = unsafe { transmute(iter.next.unwrap()) };
+    sample
+}
 
 #[embassy_executor::task]
 async fn play_task(mut control: Control<'static>, mut consumer: Consumer<'static, 102400>) {
@@ -136,7 +142,7 @@ async fn play_task(mut control: Control<'static>, mut consumer: Consumer<'static
         let frame_size: usize = dequeue_frame_size(&mut consumer); // should branch on 0
         let read_buf = consumer.read().unwrap();
         let mut iter = read_buf.chunks_exact(2);
-        while let Some(sample) = iter.next(){
+        while let Some(mut sample) = iter.next(){
             let sample: [Sample;1] = unsafe{transmute([sample[0],sample[1]])};
             Timer::after_micros(8).await;
             control.gpio_set(0, false).await;
@@ -157,7 +163,7 @@ fn enqueue_bytes(producer: &mut Producer<'static, 102400>,buf: &[u8;4096], size:
 #[embassy_executor::main]
 async fn main(spawner: Spawner) {
     let p = embassy_rp::init(Default::default());
-    let (mut decode_producer, decode_consumer) = DECODE_QUEUE.try_split().unwrap();
+    let (mut decode_producer, decode_cons) = DECODE_QUEUE.try_split().unwrap();
     let (play_producer, play_consumer) = PLAY_QUEUE.try_split().unwrap();
     let _music = include_bytes!("../../../Mr_Blue_Sky-Electric_Light_Orchestra-trimmed.mp3");
 
@@ -235,19 +241,18 @@ async fn main(spawner: Spawner) {
 
     // And now we can use it!
 
-    unwrap!(spawner.spawn(decode_task(decode_consumer, play_producer)));
-    unwrap!(spawner.spawn(play_task(control, play_consumer )));
     loop {
         let mut rx_buffer = [0; 4096];
         let mut tx_buffer = [0; 4096];
         let mut buf = [0; 4096];
 
 
+        unwrap!(spawner.spawn(decode_task(decode_cons, play_producer)));
 
         let mut socket = TcpSocket::new(stack, &mut rx_buffer, &mut tx_buffer);
         socket.set_timeout(Some(Duration::from_secs(10)));
 
-        // control.gpio_set(0, false).await;
+        control.gpio_set(0, false).await;
         info!("Listening on TCP:1234...");
         // On error warn and continue
         if let Err(e) = socket.accept(1234).await {
@@ -255,7 +260,7 @@ async fn main(spawner: Spawner) {
             continue;
         }
         info!("Received connection from {:?}", socket.remote_endpoint());
-        // control.gpio_set(0, true).await;
+        control.gpio_set(0, true).await;
         loop {
             match socket.read(&mut buf).await {
                 Ok(0) => {
