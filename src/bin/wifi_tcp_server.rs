@@ -26,18 +26,22 @@ use embedded_alloc::Heap;
 use rmp3::{RawDecoder, Sample, MAX_SAMPLES_PER_FRAME};
 use static_cell::make_static;
 use {defmt_rtt as _, panic_probe as _};
-
+use bbqueue::Error as QError;
 #[global_allocator]
 static HEAP: Heap = Heap::empty();
 
+pub enum Error{
+    DecodeError,
+}
 const SAMPLE_RATE: usize = 8000; // 8-24KHz
 const BIT_RATE: usize = 64; // 64 Bit/s
+const BUFFER_SIZE: usize = 10240;
 bind_interrupts!(struct Irqs {
     PIO0_IRQ_0 => InterruptHandler<PIO0>;
 });
 
-static DECODE_QUEUE: BBBuffer<102400> = BBBuffer::new();
-static PLAY_QUEUE: BBBuffer<102400> = BBBuffer::new();
+static DECODE_QUEUE: BBBuffer<BUFFER_SIZE> = BBBuffer::new();
+static PLAY_QUEUE: BBBuffer<BUFFER_SIZE> = BBBuffer::new();
 
 const WIFI_NETWORK: &str = "TZ Guest";
 const WIFI_PASSWORD: &str = "ilovetea";
@@ -66,25 +70,33 @@ async fn net_task(stack: &'static Stack<cyw43::NetDriver<'static>>) -> ! {
 //
 // test one should only test usage of rmp3 on the chip!!
 
-fn enqueue_frame_size(producer: &mut Producer<'static, 102400>, size: usize) {
-    let mut grant_w = producer.grant_exact(1).unwrap();
-    let frame_size: [u8; 4] = unsafe { transmute([size]) };
-    grant_w.buf().copy_from_slice(&frame_size);
-    grant_w.commit(4);
-}
+fn enqueue_frame_size(producer: &mut Producer<'static, BUFFER_SIZE>, size: usize) {
+    match producer.grant_exact(1){
+        Ok(mut grant_w) => {
+            let frame_size: [u8; 4] = unsafe { transmute([size]) };
+            grant_w.buf().copy_from_slice(&frame_size);
+            grant_w.commit(4);
+        },
+        Err(_) => info!("Error enqueueing 'frame_size'"),
+    }
+   }
 
 fn enqueue_frame(
-    producer: &mut Producer<'static, 102400>,
+    producer: &mut Producer<'static, BUFFER_SIZE>,
     size: usize,
     buf: [Sample; MAX_SAMPLES_PER_FRAME],
 ) {
     let dest: [u8; MAX_SAMPLES_PER_FRAME * 2] = unsafe { transmute(buf) };
-    let mut frame_grant = producer.grant_exact(size).unwrap();
-    frame_grant.buf().copy_from_slice(&dest[..size]);
-    frame_grant.commit(size);
+    match producer.grant_exact(size) {
+        Ok(mut frame_grant) =>{     
+            frame_grant.buf().copy_from_slice(&dest[..size]);
+            frame_grant.commit(size);
+        },
+        Err(_) => info!(""),
+    }
 }
 
-fn decode_queue(producer: &mut Producer<'static, 102400>, src_buf: &[u8]) -> Result<usize, u8> {
+fn decode_queue(producer: &mut Producer<'static, BUFFER_SIZE>, src_buf: &[u8]) -> Result<usize, u8> {
     let mut dest = [Sample::default(); MAX_SAMPLES_PER_FRAME];
     let mut decoder = RawDecoder::new();
     match decoder.next(src_buf, &mut dest) {
@@ -94,64 +106,63 @@ fn decode_queue(producer: &mut Producer<'static, 102400>, src_buf: &[u8]) -> Res
             Ok(size)
         }
         None => {
-            info!("error: decoder does not work...");
+            warn!("Error decoding frame ln:102");
             Err(0)
         }
     }
 }
 #[embassy_executor::task]
 async fn decode_task(
-    mut consumer: Consumer<'static, 102400>,
-    mut producer: Producer<'static, 102400>,
+    mut consumer: Consumer<'static, BUFFER_SIZE>,
+    mut producer: Producer<'static, BUFFER_SIZE>,
 ) {
     loop {
-        let read_buf = consumer.read().unwrap();
-        match decode_queue(&mut producer, &read_buf) {
-            Ok(size) => read_buf.release(size),
-            Err(_) => {
-                warn!("decode_task has ended!");
-                break;
+        if let Ok(grant_r) = consumer.read(){
+            match decode_queue(&mut producer, &grant_r) {
+                Ok(size) => grant_r.release(size),
+                Err(_) => {
+                    warn!("decode_task has ended!");
+                    break;
+                }
             }
         }
     }
 }
-fn dequeue_frame_size(consumer: &mut Consumer<'static, 102400>) -> usize {
-    let grant_r = consumer.read().unwrap();
-    match grant_r.is_empty(){
-        true => 0,
-        false => {
-            let mut header = [0u8; 4];
-            header.copy_from_slice(&grant_r[..3]);
-            let header: [usize; 1] = unsafe { transmute(header) };
-            header[0]
-        },
+fn dequeue_frame_size(consumer: &mut Consumer<'static, BUFFER_SIZE>) -> usize {
+    if let Ok(grant_r) = consumer.read(){
+        let mut header = [0u8; 4];
+        header.copy_from_slice(&grant_r[..3]);
+        let header: [usize; 1] = unsafe { transmute(header) };
+        header[0]
     }
+    else { 0 }
 }
 
 
 #[embassy_executor::task]
-async fn play_task(mut control: Control<'static>, mut consumer: Consumer<'static, 102400>) {
+async fn play_task(mut control: Control<'static>, mut consumer: Consumer<'static, BUFFER_SIZE>) {
+
     //check queue status first
     loop{
         let frame_size: usize = dequeue_frame_size(&mut consumer); // should branch on 0
-        let read_buf = consumer.read().unwrap();
-        let mut iter = read_buf.chunks_exact(2);
-        while let Some(sample) = iter.next(){
-            let sample: [Sample;1] = unsafe{transmute([sample[0],sample[1]])};
-            Timer::after_micros(8).await;
-            control.gpio_set(0, false).await;
-            Timer::after_micros(8).await;
-            control.gpio_set(0, true).await;
-            Timer::after_micros(sample[0] as u64).await;
-
+        if let Ok(grant_r) = consumer.read(){       
+            for sample in grant_r.chunks_exact(2) {
+                let sample: [Sample;1] = unsafe{transmute([sample[0],sample[1]])};
+                Timer::after_micros(8).await;
+                control.gpio_set(0, false).await;
+                Timer::after_micros(8).await;
+                control.gpio_set(0, true).await;
+                Timer::after_micros(sample[0] as u64).await;
+            }
+            grant_r.release(frame_size);
         }
-        read_buf.release(frame_size);
     }
 }
-fn enqueue_bytes(producer: &mut Producer<'static, 102400>,buf: &[u8;4096], size:usize){
-    let mut grant = producer.grant_exact(size).unwrap();
-    grant.buf().copy_from_slice(&buf[..size]);
-    grant.commit(size);
+fn enqueue_bytes(producer: &mut Producer<'static, BUFFER_SIZE>,buf: &[u8;4096], size:usize){
+    if let Ok(mut grant_w) = producer.grant_exact(size){
+        grant_w.buf().copy_from_slice(&buf[..size]);
+        grant_w.commit(size);
+    }
 }
 
 #[embassy_executor::main]
@@ -160,8 +171,6 @@ async fn main(spawner: Spawner) {
     let (mut decode_producer, decode_consumer) = DECODE_QUEUE.try_split().unwrap();
     let (play_producer, play_consumer) = PLAY_QUEUE.try_split().unwrap();
     let _music = include_bytes!("../../../Mr_Blue_Sky-Electric_Light_Orchestra-trimmed.mp3");
-
-
 
     let fw = include_bytes!("../../embassy/cyw43-firmware/43439A0.bin");
     let clm = include_bytes!("../../embassy/cyw43-firmware/43439A0_clm.bin");
