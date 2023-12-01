@@ -7,7 +7,6 @@
 
 extern crate alloc;
 use alloc::vec::Vec;
-use cortex_m::register::control::Control;
 use core::mem::transmute;
 use cyw43_pio::PioSpi;
 use cyw43::Control;
@@ -62,62 +61,77 @@ async fn net_task(stack: &'static Stack<cyw43::NetDriver<'static>>) -> ! {
 // alternative decoder library.
 //
 // test one should only test usage of rmp3 on the chip!!
+
+fn enqueue_frame_size(producer: &Producer<'static, 102400>, size: usize){
+    let mut grant_w = producer.grant_exact(1).unwrap();
+    let frame_size: [u8; 4] = unsafe { transmute([size]) };
+    grant_w.buf().copy_from_slice(&frame_size);
+    grant_w.commit(4);
+}
+
+fn enqueue_frame(producer: &Producer<'static, 102400>,size:usize, buf: [Sample;MAX_SAMPLES_PER_FRAME]){
+    let dest: [u8; MAX_SAMPLES_PER_FRAME * 2] = unsafe { transmute(buf) };
+    let mut frame_grant = producer.grant_exact(size).unwrap();
+    frame_grant.buf().copy_from_slice(&dest[..size]);
+    frame_grant.commit(size);
+}
+
 fn decode_queue(
-    play_producer: &mut Producer<'static, 102400>,
+    producer: &Producer<'static, 102400>,
     src_buf: &[u8],
-) {
+)->Result<usize,u8> {
     let mut dest = [Sample::default(); MAX_SAMPLES_PER_FRAME];
     let mut decoder = RawDecoder::new();
     match decoder.next(src_buf, &mut dest) {
-        Some((_frame, bytes_decoded)) => {
-            let dest: [u8; MAX_SAMPLES_PER_FRAME * 2] = unsafe { transmute(dest) };
-            info!("successful byte decoding!");
-            
-            let mut header_grant = play_producer.grant_exact(1).unwrap();
-            let header: [u8; 4] = unsafe { transmute([bytes_decoded]) };
-            header_grant.buf().copy_from_slice(&header);
-            header_grant.commit(4);
-
-            let mut frame_grant = play_producer.grant_exact(bytes_decoded).unwrap();
-            frame_grant.buf().copy_from_slice(&dest[..bytes_decoded]);
-            frame_grant.commit(bytes_decoded);
+        Some((_frame, size)) => {
+            enqueue_frame_size(&producer, size);
+            enqueue_frame(&producer, size,dest);  
+            Ok(size)
         }
         None => {
             info!("error: decoder does not work...");
+            Err(0) 
         }
     }
 }
 #[embassy_executor::task]
-async fn decode_task(mut decode_consumer: Consumer<'static, 102400>, mut play_producer: Producer<'static, 102400>){
+async fn decode_task(mut consumer: Consumer<'static, 102400>, mut producer: Producer<'static, 102400>){
     loop{
-        let read_buf = decode_consumer.read().unwrap();
-        decode_queue(&mut play_producer, &read_buf); 
+        let read_buf = consumer.read().unwrap();
+        match decode_queue(&mut producer, &read_buf){
+            Ok(size) => read_buf.release(size),
+            Err(_) => {
+                warn!("decode_task has ended!");
+                break
+            },
+        }
     }
 }
-fn read_header(consumer: & Consumer<'static, 102400>)->usize{
+fn dequeue_frame_size(consumer: & Consumer<'static, 102400>)->usize{
     let grant_r = consumer.read().unwrap();
     let mut header = [0u8;4];
     header.copy_from_slice(&grant_r[..3]);
     let header: [usize;1] = unsafe{transmute(header)};
     header[0]
 }
-fn read_sample(grant_r: & GrantR<'static,102400>,i:usize)->[Sample; 1]{
+fn dequeue_sample(grant_r: & GrantR<'static,102400>,i:usize)->[Sample; 1]{
     let mut sample = [0u8; 2];
     sample.copy_from_slice(&grant_r[i - 2..i - 1 ]);
     let sample: [Sample; 1] = unsafe{ transmute(sample)};
     sample
 }
+
 #[embassy_executor::task]
-async fn play_task( mut control: cyw43::Control, mut consumer: Consumer<'static, 102400>){
-    let frame_size: usize = read_header(& consumer);
+async fn play_task(mut control: Control<'static>, mut consumer: Consumer<'static, 102400>){
+    let frame_size: usize = dequeue_frame_size(& consumer);
     let read_buf = consumer.read().unwrap();
     for i in 0..frame_size{
-        let sample = read_sample(&read_buf, i+2); 
+        let sample = dequeue_sample(&read_buf, i+2);
+        Timer::after_micros(8).await;
         control.gpio_set(0, false).await;
-
+        Timer::after_micros(8).await;
         control.gpio_set(0, true).await;
-
-
+        Timer::after_micros(sample[0] as u64).await;
     }
     read_buf.release(frame_size);
 }
@@ -131,7 +145,6 @@ async fn main(spawner: Spawner) {
     let clm = include_bytes!("../../embassy/cyw43-firmware/43439A0_clm.bin");
 
 
-    // test_decoder::<'a>(&mut decoder, music);
     // To make flashing faster for development, you may want to flash the firmwares independently
     // at hardcoded addresses, instead of baking them into the program with `include_bytes!`:
     //     probe-rs download 43439A0.bin --format bin --chip RP2040 --base-address 0x10100000
