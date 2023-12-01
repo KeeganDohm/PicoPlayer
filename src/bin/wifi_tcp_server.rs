@@ -22,7 +22,11 @@ use static_cell::make_static;
 use {defmt_rtt as _, panic_probe as _};
 use rmp3::{RawDecoder,Sample,MAX_SAMPLES_PER_FRAME};
 use bbqueue::BBBuffer;
-use bbqueue::{Producer,Consumer};
+use bbqueue::{Producer,Consumer,GrantR,GrantW};
+
+
+const SAMPLE_RATE: usize = 8000; // 8-24KHz
+const BIT_RATE: usize = 64; // 64 Bit/s
 bind_interrupts!(struct Irqs {
     PIO0_IRQ_0 => InterruptHandler<PIO0>;
 });
@@ -68,8 +72,9 @@ fn decode_queue(
             info!("successful byte decoding!");
             
             let mut header_grant = play_producer.grant_exact(1).unwrap();
-            header_grant.buf()[0] = bytes_decoded as u8;
-            header_grant.commit(1);
+            let header: [u8; 4] = unsafe { transmute([bytes_decoded]) };
+            header_grant.buf().copy_from_slice(&header);
+            header_grant.commit(4);
 
             let mut frame_grant = play_producer.grant_exact(bytes_decoded).unwrap();
             frame_grant.buf().copy_from_slice(&dest[..bytes_decoded]);
@@ -90,21 +95,34 @@ async fn decode_task(mut decode_consumer: Consumer<'static, 102400>, mut play_pr
 #[embassy_executor::task]
 async fn play_task(mut play_consumer: Consumer<'static, 102400>){
    loop{
-        let read_buf = play_consumer.read().unwrap();
-        let mut play_buf = [0u8; MAX_SAMPLES_PER_FRAME * 2];
-        play_buf.copy_from_slice(&read_buf[..MAX_SAMPLES_PER_FRAME*2]);
-        read_buf.release(MAX_SAMPLES_PER_FRAME*2);
-        let play_buf: [Sample; MAX_SAMPLES_PER_FRAME] = unsafe {transmute(play_buf)};
-         
-    } 
-}
+        // let play_buf = read_from_queue(play_consumer);
 
-fn play(mut play_consumer: Consumer<'static, 102400>){
+
+    }
+}
+// fn read_f.copy_from_slice(&read_buf[..MAX_SAMPLES_PER_FRAME*2]);
+//     read_buf.release(MAX_SAMPLES_PER_FRAME*2);
+//     let play_buf: [Sample; MAX_SAMPLES_PER_FRAME] = unsafe {transmute(play_buf)};
+//     play_buf
+
+// }
+fn read_header(grant_r: &mut GrantR<'static,102400>)->usize{
+    let mut header = [0u8;4];
+    header.copy_from_slice(&grant_r[..3]);
+    let header: [usize;1] = unsafe{transmute(header)};
+    header[0]
+
+}
+fn play(mut play_consumer: Consumer<'static, 102400>)->[Sample;MAX_SAMPLES_PER_FRAMEax]{
     let read_buf = play_consumer.read().unwrap();
+    let mut header = [0u8;4];
+    header.copy_from_slice(&read_buf[..3]);
+    let header: [usize;1] = unsafe{transmute(header)};
     let mut play_buf = [0u8; MAX_SAMPLES_PER_FRAME * 2];
     play_buf.copy_from_slice(&read_buf[..MAX_SAMPLES_PER_FRAME*2]);
     read_buf.release(MAX_SAMPLES_PER_FRAME*2);
     let play_buf: [Sample; MAX_SAMPLES_PER_FRAME] = unsafe {transmute(play_buf)};
+    play_buf
 }
 
 #[embassy_executor::main]
