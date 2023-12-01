@@ -5,8 +5,8 @@
 #![allow(stable_features, unknown_lints, async_fn_in_trait)]
 #![feature(alloc)]
 
-use embedded_alloc::Heap;
 extern crate alloc;
+use embedded_alloc::Heap;
 use alloc::vec::Vec;
 use core::mem::transmute;
 use cyw43_pio::PioSpi;
@@ -26,6 +26,8 @@ use rmp3::{RawDecoder,Sample,MAX_SAMPLES_PER_FRAME};
 use bbqueue::BBBuffer;
 use bbqueue::{Producer,Consumer,GrantR,GrantW};
 
+#[global_allocator]
+static HEAP: Heap = Heap::new();
 
 const SAMPLE_RATE: usize = 8000; // 8-24KHz
 const BIT_RATE: usize = 64; // 64 Bit/s
