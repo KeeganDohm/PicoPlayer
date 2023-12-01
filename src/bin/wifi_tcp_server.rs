@@ -7,8 +7,10 @@
 
 extern crate alloc;
 use alloc::vec::Vec;
+use cortex_m::register::control::Control;
 use core::mem::transmute;
 use cyw43_pio::PioSpi;
+use cyw43::Control;
 use defmt::*;
 use embassy_executor::Spawner;
 use embassy_net::tcp::TcpSocket;
@@ -106,23 +108,32 @@ async fn play_task(mut play_consumer: Consumer<'static, 102400>){
 //     play_buf
 
 // }
-fn read_header(grant_r: &mut GrantR<'static,102400>)->usize{
+fn read_header(consumer: & Consumer<'static, 102400>)->usize{
+    let grant_r = consumer.read().unwrap();
     let mut header = [0u8;4];
     header.copy_from_slice(&grant_r[..3]);
     let header: [usize;1] = unsafe{transmute(header)};
     header[0]
-
 }
-fn play(mut play_consumer: Consumer<'static, 102400>)->[Sample;MAX_SAMPLES_PER_FRAMEax]{
-    let read_buf = play_consumer.read().unwrap();
-    let mut header = [0u8;4];
-    header.copy_from_slice(&read_buf[..3]);
-    let header: [usize;1] = unsafe{transmute(header)};
-    let mut play_buf = [0u8; MAX_SAMPLES_PER_FRAME * 2];
-    play_buf.copy_from_slice(&read_buf[..MAX_SAMPLES_PER_FRAME*2]);
-    read_buf.release(MAX_SAMPLES_PER_FRAME*2);
-    let play_buf: [Sample; MAX_SAMPLES_PER_FRAME] = unsafe {transmute(play_buf)};
-    play_buf
+fn read_sample(grant_r: & GrantR<'static,102400>,i:usize)->[Sample; 1]{
+    let mut sample = [0u8; 2];
+    sample.copy_from_slice(&grant_r[i - 2..i - 1 ]);
+    let sample: [Sample; 1] = unsafe{ transmute(sample)};
+    sample
+}
+#[embassy_executor::task]
+async fn play( mut control: cyw43::Control, mut consumer: Consumer<'static, 102400>){
+    let frame_size: usize = read_header(& consumer);
+    let read_buf = consumer.read().unwrap();
+    for i in 0..frame_size{
+        let sample = read_sample(&read_buf, i+2); 
+        control.gpio_set(0, false).await;
+
+        control.gpio_set(0, true).await;
+
+
+    }
+    read_buf.release(frame_size);
 }
 
 #[embassy_executor::main]
