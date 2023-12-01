@@ -94,20 +94,6 @@ async fn decode_task(mut decode_consumer: Consumer<'static, 102400>, mut play_pr
         decode_queue(&mut play_producer, &read_buf); 
     }
 }
-#[embassy_executor::task]
-async fn play_task(mut play_consumer: Consumer<'static, 102400>){
-   loop{
-        // let play_buf = read_from_queue(play_consumer);
-
-
-    }
-}
-// fn read_f.copy_from_slice(&read_buf[..MAX_SAMPLES_PER_FRAME*2]);
-//     read_buf.release(MAX_SAMPLES_PER_FRAME*2);
-//     let play_buf: [Sample; MAX_SAMPLES_PER_FRAME] = unsafe {transmute(play_buf)};
-//     play_buf
-
-// }
 fn read_header(consumer: & Consumer<'static, 102400>)->usize{
     let grant_r = consumer.read().unwrap();
     let mut header = [0u8;4];
@@ -122,7 +108,7 @@ fn read_sample(grant_r: & GrantR<'static,102400>,i:usize)->[Sample; 1]{
     sample
 }
 #[embassy_executor::task]
-async fn play( mut control: cyw43::Control, mut consumer: Consumer<'static, 102400>){
+async fn play_task( mut control: cyw43::Control, mut consumer: Consumer<'static, 102400>){
     let frame_size: usize = read_header(& consumer);
     let read_buf = consumer.read().unwrap();
     for i in 0..frame_size{
