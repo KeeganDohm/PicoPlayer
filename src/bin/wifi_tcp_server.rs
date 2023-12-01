@@ -9,7 +9,7 @@ extern crate alloc;
 use embedded_alloc::Heap;
 
 use alloc::vec::Vec;
-use core::str::from_utf8;
+use core::mem::transmute;
 use cyw43_pio::PioSpi;
 use defmt::*;
 use embassy_executor::Spawner;
@@ -32,24 +32,8 @@ bind_interrupts!(struct Irqs {
 #[global_allocator]
 static HEAP: Heap = Heap::empty();
 
-static QUEUE: BBBuffer<102400> = BBBuffer::new();
-// struct Queue{
-//     queue: BBBuffer<102400>,
-//     producer: Producer<'static, 102400>,
-//     consumer: Consumer<'static, 102400>,
-// }
-
-// impl Queue {
-//     pub fn new() -> Result<Self, u8> {
-//         let mut bb_buffer: BBBuffer<102400> = BBBuffer::new();
-//         let (prod, cons) = bb_buffer.try_split().unwrap();
-//         Ok(Self {
-//             queue: bb_buffer,
-//             producer: prod,
-//             consumer: cons,
-//         })
-//     }
-// }
+static DECODE_QUEUE: BBBuffer<102400> = BBBuffer::new();
+static PLAY_QUEUE: BBBuffer<102400> = BBBuffer::new();
 
 const WIFI_NETWORK: &str = "TZ Guest";
 const WIFI_PASSWORD: &str = "ilovetea";
@@ -79,28 +63,31 @@ async fn net_task(stack: &'static Stack<cyw43::NetDriver<'static>>) -> ! {
 // test one should only test usage of rmp3 on the chip!!
 
 
-fn test_decoder<'a>(decoder: &mut RawDecoder, src_buf: &'a [u8]) -> Result<(Frame<'a, '_>, usize), u8> {
+fn test_decoder<'a>(
+    play_producer: &mut Producer<'static, 102400>,
+    decoder: &mut RawDecoder,
+    src_buf: &[u8],
+) {
     let mut dest = [Sample::default(); MAX_SAMPLES_PER_FRAME];
-    match decoder.next(src_buf, &mut dest){
-        Some(f)=> {
-            info!("Successful byte decoding!");
-            Ok(f)
+    match decoder.next(src_buf, &mut dest) {
+        Some((_frame, bytes_decoded)) => {
+            let dest: [u8; MAX_SAMPLES_PER_FRAME * 2] = unsafe { transmute(dest) };
+            info!("successful byte decoding!");
+            let mut grant_w = play_producer.grant_exact(bytes_decoded).unwrap();
+            grant_w.buf().copy_from_slice(&dest[..bytes_decoded]);
+            grant_w.commit(bytes_decoded);
         }
         None => {
-            info!("ERROR: decoder does not work...");
-            Err(0) // Wrapping error value in Err()
+            info!("error: decoder does not work...");
         }
     }
 }
-
 #[embassy_executor::task]
-async fn queue_checker(mut consumer: Consumer<'static,102400>){
-    {
-        loop{
-            let read_buf = consumer.read().unwrap();
-            let mut raw_decoder = RawDecoder::new();
-            test_decoder(&mut raw_decoder,&read_buf);
-        }
+async fn queue_checker(mut decode_consumer: Consumer<'static,102400>, mut play_producer: Producer<'static, 102400>){
+    loop{
+        let read_buf = decode_consumer.read().unwrap();
+        let mut raw_decoder = RawDecoder::new();
+        test_decoder(&mut play_producer, &mut raw_decoder,&read_buf); 
     }
 }
 
@@ -189,7 +176,7 @@ async fn main(spawner: Spawner) {
         let mut tx_buffer = [0; 4096];
         let mut buf = [0; 4096];
         // let mut queue: Queue = Queue::new().unwrap();
-        let (mut prod, cons) = QUEUE.try_split().unwrap();
+        let (mut prod, cons) = DECODE_QUEUE.try_split().unwrap();
         unwrap!(spawner.spawn(queue_checker(cons)));
 
         let mut socket = TcpSocket::new(stack, &mut rx_buffer, &mut tx_buffer);
