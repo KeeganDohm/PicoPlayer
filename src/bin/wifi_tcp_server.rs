@@ -6,8 +6,6 @@
 #![feature(alloc)]
 
 extern crate alloc;
-use embedded_alloc::Heap;
-
 use alloc::vec::Vec;
 use core::mem::transmute;
 use cyw43_pio::PioSpi;
@@ -22,15 +20,12 @@ use embassy_rp::pio::{InterruptHandler, Pio};
 use embassy_time::{Duration, Timer};
 use static_cell::make_static;
 use {defmt_rtt as _, panic_probe as _};
-use rmp3::{RawDecoder,Sample,MAX_SAMPLES_PER_FRAME,Frame};
+use rmp3::{RawDecoder,Sample,MAX_SAMPLES_PER_FRAME};
 use bbqueue::BBBuffer;
-use bbqueue::{Producer,Consumer,GrantR,GrantW};
+use bbqueue::{Producer,Consumer};
 bind_interrupts!(struct Irqs {
     PIO0_IRQ_0 => InterruptHandler<PIO0>;
 });
-
-#[global_allocator]
-static HEAP: Heap = Heap::empty();
 
 static DECODE_QUEUE: BBBuffer<102400> = BBBuffer::new();
 static PLAY_QUEUE: BBBuffer<102400> = BBBuffer::new();
@@ -61,21 +56,24 @@ async fn net_task(stack: &'static Stack<cyw43::NetDriver<'static>>) -> ! {
 // alternative decoder library.
 //
 // test one should only test usage of rmp3 on the chip!!
-
-
-fn test_decoder<'a>(
+fn decode_queue(
     play_producer: &mut Producer<'static, 102400>,
-    decoder: &mut RawDecoder,
     src_buf: &[u8],
 ) {
     let mut dest = [Sample::default(); MAX_SAMPLES_PER_FRAME];
+    let mut decoder = RawDecoder::new();
     match decoder.next(src_buf, &mut dest) {
         Some((_frame, bytes_decoded)) => {
             let dest: [u8; MAX_SAMPLES_PER_FRAME * 2] = unsafe { transmute(dest) };
             info!("successful byte decoding!");
-            let mut grant_w = play_producer.grant_exact(bytes_decoded).unwrap();
-            grant_w.buf().copy_from_slice(&dest[..bytes_decoded]);
-            grant_w.commit(bytes_decoded);
+            
+            let mut header_grant = play_producer.grant_exact(1).unwrap();
+            header_grant.buf()[0] = bytes_decoded as u8;
+            header_grant.commit(1);
+
+            let mut frame_grant = play_producer.grant_exact(bytes_decoded).unwrap();
+            frame_grant.buf().copy_from_slice(&dest[..bytes_decoded]);
+            frame_grant.commit(bytes_decoded);
         }
         None => {
             info!("error: decoder does not work...");
@@ -83,15 +81,14 @@ fn test_decoder<'a>(
     }
 }
 #[embassy_executor::task]
-async fn queue_checker(mut decode_consumer: Consumer<'static,102400>, mut play_producer: Producer<'static, 102400>){
+async fn decode_task(mut decode_consumer: Consumer<'static, 102400>, mut play_producer: Producer<'static, 102400>){
     loop{
         let read_buf = decode_consumer.read().unwrap();
-        let mut raw_decoder = RawDecoder::new();
-        test_decoder(&mut play_producer, &mut raw_decoder,&read_buf); 
+        decode_queue(&mut play_producer, &read_buf); 
     }
 }
 #[embassy_executor::task]
-async fn output_audio(mut play_consumer: Consumer<'static, 102400>){
+async fn play_task(mut play_consumer: Consumer<'static, 102400>){
    loop{
         let read_buf = play_consumer.read().unwrap();
         let mut play_buf = [0u8; MAX_SAMPLES_PER_FRAME * 2];
@@ -102,10 +99,18 @@ async fn output_audio(mut play_consumer: Consumer<'static, 102400>){
     } 
 }
 
+fn play(mut play_consumer: Consumer<'static, 102400>){
+    let read_buf = play_consumer.read().unwrap();
+    let mut play_buf = [0u8; MAX_SAMPLES_PER_FRAME * 2];
+    play_buf.copy_from_slice(&read_buf[..MAX_SAMPLES_PER_FRAME*2]);
+    read_buf.release(MAX_SAMPLES_PER_FRAME*2);
+    let play_buf: [Sample; MAX_SAMPLES_PER_FRAME] = unsafe {transmute(play_buf)};
+}
+
 #[embassy_executor::main]
 async fn main(spawner: Spawner) {
     let p = embassy_rp::init(Default::default());
-    // let music = include_bytes!("../../../Mr_Blue_Sky-Electric_Light_Orchestra-trimmed.mp3");
+    let music = include_bytes!("../../../Mr_Blue_Sky-Electric_Light_Orchestra-trimmed.mp3");
 
     let fw = include_bytes!("../../embassy/cyw43-firmware/43439A0.bin");
     let clm = include_bytes!("../../embassy/cyw43-firmware/43439A0_clm.bin");
@@ -189,7 +194,7 @@ async fn main(spawner: Spawner) {
         let (mut decode_prod, decode_cons) = DECODE_QUEUE.try_split().unwrap();
         let (mut play_prod, play_cons) = PLAY_QUEUE.try_split().unwrap();
 
-        unwrap!(spawner.spawn(queue_checker(decode_cons, play_prod)));
+        unwrap!(spawner.spawn(decode_task(decode_cons, play_prod)));
 
         let mut socket = TcpSocket::new(stack, &mut rx_buffer, &mut tx_buffer);
         socket.set_timeout(Some(Duration::from_secs(10)));
