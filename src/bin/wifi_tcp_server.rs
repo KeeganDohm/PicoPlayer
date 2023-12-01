@@ -45,7 +45,6 @@ static PLAY_QUEUE: BBBuffer<BUFFER_SIZE> = BBBuffer::new();
 
 const WIFI_NETWORK: &str = "TZ Guest";
 const WIFI_PASSWORD: &str = "ilovetea";
-
 #[embassy_executor::task]
 async fn wifi_task(
     runner: cyw43::Runner<
@@ -71,7 +70,7 @@ async fn net_task(stack: &'static Stack<cyw43::NetDriver<'static>>) -> ! {
 // test one should only test usage of rmp3 on the chip!!
 
 fn enqueue_frame_size(producer: &mut Producer<'static, BUFFER_SIZE>, size: usize) {
-    if let Ok(mut grant_w) = producer.grant_exact(1){
+    if let Ok(mut grant_w) = producer.grant_exact(4){
         let frame_size: [u8; 4] = unsafe { transmute([size]) };
         grant_w.buf().copy_from_slice(&frame_size);
         grant_w.commit(4);
@@ -112,6 +111,7 @@ async fn decode_task(
 ) {
     info!("STARTING DECODE_TASK");
     loop {
+        Timer::after_micros(0).await;
         if let Ok(grant_r) = consumer.read(){
             match decode_queue(&mut producer, &grant_r) {
                 Ok(size) => grant_r.release(size),
@@ -126,30 +126,38 @@ async fn decode_task(
 fn dequeue_frame_size(consumer: &mut Consumer<'static, BUFFER_SIZE>) -> usize {
     if let Ok(grant_r) = consumer.read(){
         let mut header = [0u8; 4];
-        header.copy_from_slice(&grant_r[..3]);
+        header.copy_from_slice(&grant_r[..4]);
         let header: [usize; 1] = unsafe { transmute(header) };
         header[0]
     }
     else { 0 }
 }
 
-
 #[embassy_executor::task]
 async fn play_task(mut control: Control<'static>, mut consumer: Consumer<'static, BUFFER_SIZE>) {
     info!("STARTING PLAY_TASK");
+    control.gpio_set(0, false).await;
+    let mut led_on: bool = false;
     //check queue status first
     loop{
+        Timer::after_micros(0).await;
         let frame_size: usize = dequeue_frame_size(&mut consumer); // should branch on 0
         if let Ok(grant_r) = consumer.read(){       
+            led_on = true;
             for sample in grant_r.chunks_exact(2) {
                 let sample: [Sample;1] = unsafe{transmute([sample[0],sample[1]])};
-                Timer::after_micros(8).await;
                 control.gpio_set(0, false).await;
-                Timer::after_micros(8).await;
+                Timer::after_secs(1).await;
                 control.gpio_set(0, true).await;
-                Timer::after_micros(sample[0] as u64).await;
+                Timer::after_secs(sample[0] as u64).await;
             }
             grant_r.release(frame_size);
+        }
+        else{
+            if led_on{
+                control.gpio_set(0, false).await;
+                led_on = false;
+            }
         }
     }
 }
@@ -251,7 +259,7 @@ async fn main(spawner: Spawner) {
 
 
         let mut socket = TcpSocket::new(stack, &mut rx_buffer, &mut tx_buffer);
-        socket.set_timeout(Some(Duration::from_secs(10)));
+        socket.set_timeout(Some(Duration::from_secs(1000)));
 
         // control.gpio_set(0, false).await;
         info!("Listening on TCP:1234...");
