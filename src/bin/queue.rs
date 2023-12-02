@@ -1,11 +1,11 @@
-// #![no_std]
-// #![no_main]
-// #![feature(type_alias_impl_trait)]
-// #![feature(async_fn_in_trait)]
-// #![allow(stable_features, unknown_lints, async_fn_in_trait)]
+#![no_std]
+#![no_main]
+#![feature(type_alias_impl_trait)]
+#![feature(async_fn_in_trait)]
+#![allow(stable_features, unknown_lints, async_fn_in_trait)]
 
 
-extern crate alloc;
+// extern crate alloc;
 use bbqueue::{Consumer, Producer};
 use core::mem::transmute;
 use cyw43::Control;
