@@ -27,8 +27,11 @@ use rmp3::{RawDecoder, Sample, MAX_SAMPLES_PER_FRAME};
 use static_cell::make_static;
 use {defmt_rtt as _, panic_probe as _};
 use bbqueue::Error as QError;
+use embassy_rp::multicore::spawn_core1;
+use embassy_rp::multicore::Stack as MStack;
 #[global_allocator]
 static HEAP: Heap = Heap::empty();
+
 
 pub enum Error{
     DecodeError,
@@ -108,7 +111,7 @@ fn decode_queue(producer: &mut Producer<'static, BUFFER_SIZE>, src_buf: &[u8]) -
 async fn decode_task(
     mut consumer: Consumer<'static, BUFFER_SIZE>,
     mut producer: Producer<'static, BUFFER_SIZE>,
-) {
+)->! {
     info!("STARTING DECODE_TASK");
     loop {
         Timer::after_micros(0).await;
@@ -116,8 +119,8 @@ async fn decode_task(
             match decode_queue(&mut producer, &grant_r) {
                 Ok(size) => grant_r.release(size),
                 Err(_) => {
-                    warn!("decode_task has ended!");
-                    break;
+                    warn!("decode_task had an error!");
+                    grant_r.release(0);
                 }
             }
         }
@@ -134,7 +137,7 @@ fn dequeue_frame_size(consumer: &mut Consumer<'static, BUFFER_SIZE>) -> usize {
 }
 
 #[embassy_executor::task]
-async fn play_task(mut control: Control<'static>, mut consumer: Consumer<'static, BUFFER_SIZE>) {
+async fn play_task(mut control: Control<'static>, mut consumer: Consumer<'static, BUFFER_SIZE>)->! {
     info!("STARTING PLAY_TASK");
     control.gpio_set(0, false).await;
     let mut led_on: bool = false;
@@ -162,7 +165,6 @@ async fn play_task(mut control: Control<'static>, mut consumer: Consumer<'static
             }
         }
     }
-    warn!("PLAY_TASK ENDED")
 }
 fn enqueue_bytes(producer: &mut Producer<'static, BUFFER_SIZE>,buf: &[u8;4096], size:usize){
     if let Ok(mut grant_w) = producer.grant_exact(size){
