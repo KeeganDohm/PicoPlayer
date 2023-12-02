@@ -140,9 +140,10 @@ async fn play_task(mut control: Control<'static>, mut consumer: Consumer<'static
     let mut led_on: bool = false;
     //check queue status first
     loop{
-        Timer::after_micros(0).await;
+        Timer::after_micros(1).await;
         let frame_size: usize = dequeue_frame_size(&mut consumer); // should branch on 0
-        if let Ok(grant_r) = consumer.read(){       
+        if let Ok(grant_r) = consumer.read(){
+            info!("SETTING LED ON");
             led_on = true;
             for sample in grant_r.chunks_exact(2) {
                 let sample: [Sample;1] = unsafe{transmute([sample[0],sample[1]])};
@@ -155,11 +156,13 @@ async fn play_task(mut control: Control<'static>, mut consumer: Consumer<'static
         }
         else{
             if led_on{
+                info!("SETTING LED OFF");
                 control.gpio_set(0, false).await;
                 led_on = false;
             }
         }
     }
+    warn!("PLAY_TASK ENDED")
 }
 fn enqueue_bytes(producer: &mut Producer<'static, BUFFER_SIZE>,buf: &[u8;4096], size:usize){
     if let Ok(mut grant_w) = producer.grant_exact(size){
