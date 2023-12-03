@@ -92,7 +92,7 @@ pub fn enqueue_bytes(producer: &mut Producer<'static, BUFFER_SIZE>,buf: &[u8;409
 }
 
 #[embassy_executor::task]
-pub async fn play_task(mut control: Control<'static>, mut consumer: Consumer<'static, BUFFER_SIZE>)->! {
+pub async fn play_task(/* mut control: Control<'static>,*/ mut consumer: Consumer<'static, BUFFER_SIZE>)->! {
     info!("STARTING PLAY_TASK");
     control.gpio_set(0, false).await;
     let mut led_on: bool = false;

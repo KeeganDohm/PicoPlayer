@@ -32,6 +32,7 @@ mod queue;
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::channel::Channel;
 use queue::{decode_task,play_task, enqueue_bytes};
+use bbqueue::{Producer,Consumer};
 use cortex_m::Peripherals as CortexPeripherals;
 
 enum LedState {
@@ -75,15 +76,7 @@ async fn wifi_task(
 async fn net_task(stack: &'static Stack<cyw43::NetDriver<'static>>) -> ! {
     stack.run().await
 }
-async fn main(spawner: Spawner) {
 
-       //let config = embassy_net::Config::ipv4_static(embassy_net::StaticConfigV4 {
-    //    address: Ipv4Cidr::new(Ipv4Address::new(192, 168, 69, 2), 24),
-    //    dns_servers: Vec::new(),
-    //    gateway: Some(Ipv4Address::new(192, 168, 69, 1)),
-    //});
-
-   }
 #[cortex_m_rt::entry]
 fn main() -> ! {
     info!("PROGRAM START");
@@ -95,15 +88,21 @@ fn main() -> ! {
     
         spawn_core1(p.CORE1, unsafe { &mut CORE1_STACK }, move || {
         let executor1 = EXECUTOR1.init(Executor::new());
-        executor1.run(|spawner| unwrap!(spawner.spawn(core1_task())));
+        executor1.run(|spawner| unwrap!(spawner.spawn(core1_task(play_consumer))));
     });
 
     let executor0 = EXECUTOR0.init(Executor::new());
-    executor0.run(|spawner| unwrap!(spawner.spawn(core0_task(spawner,p))));
+    executor0.run(|spawner| unwrap!(spawner.spawn(core0_task(spawner,p, play_producer, decode_consumer, decode_producer))));
 }
 
 #[embassy_executor::task]
-async fn core0_task(spawner: Spawner,p: embassy_rp::Peripherals) {
+async fn core0_task(
+    spawner: Spawner,
+    p: embassy_rp::Peripherals, 
+    play_producer: Producer<'static, BUFFER_SIZE>,
+    decode_consumer: Consumer<'static, BUFFER_SIZE>, 
+    mut decode_producer: Producer<'static,BUFFER_SIZE>
+) {
     info!("Hello from core 0");
     let fw = include_bytes!("../../embassy/cyw43-firmware/43439A0.bin");
     let clm = include_bytes!("../../embassy/cyw43-firmware/43439A0_clm.bin");
@@ -211,13 +210,13 @@ async fn core0_task(spawner: Spawner,p: embassy_rp::Peripherals) {
 
 #[embassy_executor::task]
 async fn core1_task(consumer: Consumer<'static,BUFFER_SIZE>) {
-    unwrap!(spawner.spawn(play_task(control, consumer )));
-    let led = LedState::new();
+    unwrap!(spawner.spawn(play_task(consumer)));
+    // let led = LedState::new();
         info!("Hello from core 1");
-    loop {
-        match CHANNEL.receive().await {
-            LedState::On => led.set_high(),
-            LedState::Off => led.set_low(),
-        }
-    }
+    // loop {
+    //     match CHANNEL.receive().await {
+    //         // LedState::On => led.set_high(),
+    //         // LedState::Off => led.set_low(),
+    //     }
+    // }
 }
