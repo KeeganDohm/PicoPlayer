@@ -31,10 +31,13 @@ use embassy_executor::Executor;
 mod queue;
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::channel::Channel;
-use queue::{decode_task,play_task, enqueue_bytes};
+use queue::{decode_task,enqueue_bytes};
 use bbqueue::{Producer,Consumer};
 use cortex_m::Peripherals as CortexPeripherals;
-
+use queue::dequeue_frame_size;
+use cyw43::Control;
+use core::mem::transmute;
+use rmp3::Sample;
 enum LedState {
     On,
     Off,
@@ -71,6 +74,35 @@ async fn wifi_task(
 ) -> ! {
     runner.run().await
 }
+pub async fn play_task(mut control: Control<'static>, mut consumer: Consumer<'static, BUFFER_SIZE>)->! {
+    info!("STARTING PLAY_TASK");
+    control.gpio_set(0, false).await;
+    let mut led_on: bool = false;
+    //check queue status first
+    loop{
+        Timer::after_micros(1).await;
+        let frame_size: usize = dequeue_frame_size(&mut consumer); // should branch on 0
+        if let Ok(grant_r) = consumer.read(){
+            info!("SETTING LED ON");
+            led_on = true;
+            for sample in grant_r.chunks_exact(2) {
+                let sample: [Sample;1] = unsafe{transmute([sample[0],sample[1]])};
+                control.gpio_set(0, false).await;
+                Timer::after_secs(1).await;
+                control.gpio_set(0, true).await;
+                Timer::after_secs(sample[0] as u64).await;
+            }
+            grant_r.release(frame_size);
+        }
+        else{
+            if led_on{
+                info!("SETTING LED OFF");
+                control.gpio_set(0, false).await;
+                led_on = false;
+            }
+        }
+    }
+}
 
 #[embassy_executor::task]
 async fn net_task(stack: &'static Stack<cyw43::NetDriver<'static>>) -> ! {
@@ -81,27 +113,21 @@ async fn net_task(stack: &'static Stack<cyw43::NetDriver<'static>>) -> ! {
 fn main() -> ! {
     info!("PROGRAM START");
     let p = embassy_rp::init(Default::default());
-    let (mut decode_producer, decode_consumer) = DECODE_QUEUE.try_split().unwrap();
-    let (play_producer, play_consumer) = PLAY_QUEUE.try_split().unwrap();
-    let _music = include_bytes!("../../../Mr_Blue_Sky-Electric_Light_Orchestra-trimmed.mp3");
+        let _music = include_bytes!("../../../Mr_Blue_Sky-Electric_Light_Orchestra-trimmed.mp3");
 
     
-        spawn_core1(p.CORE1, unsafe { &mut CORE1_STACK }, move || {
-        let executor1 = EXECUTOR1.init(Executor::new());
-        executor1.run(|spawner| unwrap!(spawner.spawn(core1_task(play_consumer))));
-    });
-
+        
     let executor0 = EXECUTOR0.init(Executor::new());
-    executor0.run(|spawner| unwrap!(spawner.spawn(core0_task(spawner,p, play_producer, decode_consumer, decode_producer))));
+    executor0.run(|spawner| unwrap!(spawner.spawn(core0_task(spawner,p,/*  play_producer, decode_consumer, decode_producer */))));
 }
 
 #[embassy_executor::task]
 async fn core0_task(
     spawner: Spawner,
     p: embassy_rp::Peripherals, 
-    play_producer: Producer<'static, BUFFER_SIZE>,
-    decode_consumer: Consumer<'static, BUFFER_SIZE>, 
-    mut decode_producer: Producer<'static,BUFFER_SIZE>
+    // play_producer: Producer<'static, BUFFER_SIZE>,
+    // decode_consumer: Consumer<'static, BUFFER_SIZE>, 
+    // mut decode_producer: Producer<'static,BUFFER_SIZE>
 ) {
     info!("Hello from core 0");
     let fw = include_bytes!("../../embassy/cyw43-firmware/43439A0.bin");
@@ -118,6 +144,9 @@ async fn core0_task(
         p.PIN_29,
         p.DMA_CH0,
     );
+    let (mut decode_producer, decode_consumer) = DECODE_QUEUE.try_split().unwrap();
+    let (play_producer, play_consumer) = PLAY_QUEUE.try_split().unwrap();
+
     let state = make_static!(cyw43::State::new());
     let (net_device, mut control, runner) = cyw43::new(state, pwr, spi, fw).await;
     unwrap!(spawner.spawn(wifi_task(runner)));
@@ -160,6 +189,10 @@ async fn core0_task(
     info!("DHCP is now up!");
 
     // And now we can use it!
+    spawn_core1(p.CORE1, unsafe { &mut CORE1_STACK }, move || {
+        let executor1 = EXECUTOR1.init(Executor::new());
+        executor1.run(|spawner| unwrap!(spawner.spawn(core1_task(control,play_consumer))));
+    });
 
     unwrap!(spawner.spawn(decode_task(decode_consumer, play_producer)));
     loop {
@@ -199,18 +232,12 @@ async fn core0_task(
             };
         }
     }
-
-    loop {
-        CHANNEL.send(LedState::On).await;
-        Timer::after_millis(100).await;
-        CHANNEL.send(LedState::Off).await;
-        Timer::after_millis(400).await;
-    }
 }
 
 #[embassy_executor::task]
-async fn core1_task(consumer: Consumer<'static,BUFFER_SIZE>) {
-    unwrap!(spawner.spawn(play_task(consumer)));
+async fn core1_task(control: Control<'static>,consumer: Consumer<'static,BUFFER_SIZE>) {
+    play_task(control,consumer);
+    
     // let led = LedState::new();
         info!("Hello from core 1");
     // loop {

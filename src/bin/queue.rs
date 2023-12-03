@@ -74,7 +74,7 @@ pub async fn decode_task(
 
 
 //PLAY QUEUE FUNCTIONS
-fn dequeue_frame_size(consumer: &mut Consumer<'static, BUFFER_SIZE>) -> usize {
+pub fn dequeue_frame_size(consumer: &mut Consumer<'static, BUFFER_SIZE>) -> usize {
     if let Ok(grant_r) = consumer.read(){
         let mut header = [0u8; 4];
         header.copy_from_slice(&grant_r[..4]);
@@ -91,34 +91,34 @@ pub fn enqueue_bytes(producer: &mut Producer<'static, BUFFER_SIZE>,buf: &[u8;409
     }
 }
 
-#[embassy_executor::task]
-pub async fn play_task(/* mut control: Control<'static>,*/ mut consumer: Consumer<'static, BUFFER_SIZE>)->! {
-    info!("STARTING PLAY_TASK");
-    control.gpio_set(0, false).await;
-    let mut led_on: bool = false;
-    //check queue status first
-    loop{
-        Timer::after_micros(1).await;
-        let frame_size: usize = dequeue_frame_size(&mut consumer); // should branch on 0
-        if let Ok(grant_r) = consumer.read(){
-            info!("SETTING LED ON");
-            led_on = true;
-            for sample in grant_r.chunks_exact(2) {
-                let sample: [Sample;1] = unsafe{transmute([sample[0],sample[1]])};
-                control.gpio_set(0, false).await;
-                Timer::after_secs(1).await;
-                control.gpio_set(0, true).await;
-                Timer::after_secs(sample[0] as u64).await;
-            }
-            grant_r.release(frame_size);
-        }
-        else{
-            if led_on{
-                info!("SETTING LED OFF");
-                control.gpio_set(0, false).await;
-                led_on = false;
-            }
-        }
-    }
-}
+// #[embassy_executor::task]
+// pub async fn play_task(/* mut control: Control<'static>,*/ mut consumer: Consumer<'static, BUFFER_SIZE>)->! {
+//     info!("STARTING PLAY_TASK");
+//     control.gpio_set(0, false).await;
+//     let mut led_on: bool = false;
+//     //check queue status first
+//     loop{
+//         Timer::after_micros(1).await;
+//         let frame_size: usize = dequeue_frame_size(&mut consumer); // should branch on 0
+//         if let Ok(grant_r) = consumer.read(){
+//             info!("SETTING LED ON");
+//             led_on = true;
+//             for sample in grant_r.chunks_exact(2) {
+//                 let sample: [Sample;1] = unsafe{transmute([sample[0],sample[1]])};
+//                 control.gpio_set(0, false).await;
+//                 Timer::after_secs(1).await;
+//                 control.gpio_set(0, true).await;
+//                 Timer::after_secs(sample[0] as u64).await;
+//             }
+//             grant_r.release(frame_size);
+//         }
+//         else{
+//             if led_on{
+//                 info!("SETTING LED OFF");
+//                 control.gpio_set(0, false).await;
+//                 led_on = false;
+//             }
+//         }
+//     }
+// }
 
