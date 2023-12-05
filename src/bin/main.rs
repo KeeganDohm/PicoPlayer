@@ -113,10 +113,8 @@ async fn net_task(stack: &'static Stack<cyw43::NetDriver<'static>>) -> ! {
 fn main() -> ! {
     info!("PROGRAM START");
     let p = embassy_rp::init(Default::default());
-        let _music = include_bytes!("../../../Mr_Blue_Sky-Electric_Light_Orchestra-trimmed.mp3");
+    let _music = include_bytes!("../../../Mr_Blue_Sky-Electric_Light_Orchestra-trimmed.mp3");
 
-    
-        
     let executor0 = EXECUTOR0.init(Executor::new());
     executor0.run(|spawner| unwrap!(spawner.spawn(core0_task(spawner,p,/*  play_producer, decode_consumer, decode_producer */))));
 }
