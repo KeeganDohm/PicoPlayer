@@ -8,9 +8,8 @@
 // extern crate alloc;
 use bbqueue::{Consumer, Producer};
 use core::mem::transmute;
-use cyw43::Control;
 use defmt::*;
-use embassy_time::{Timer};
+use embassy_time::Timer;
 use rmp3::{RawDecoder, Sample, MAX_SAMPLES_PER_FRAME};
 use {defmt_rtt as _, panic_probe as _};
 const BUFFER_SIZE: usize = 10240;
@@ -92,9 +91,9 @@ pub fn enqueue_bytes(producer: &mut Producer<'static, BUFFER_SIZE>,buf: &[u8;409
 }
 
 // #[embassy_executor::task]
-// pub async fn play_task(/* mut control: Control<'static>,*/ mut consumer: Consumer<'static, BUFFER_SIZE>)->! {
+// pub async fn play_task(mut consumer: Consumer<'static, BUFFER_SIZE>)->! {
 //     info!("STARTING PLAY_TASK");
-//     control.gpio_set(0, false).await;
+//     // control.gpio_set(0, false).await;
 //     let mut led_on: bool = false;
 //     //check queue status first
 //     loop{
@@ -105,18 +104,12 @@ pub fn enqueue_bytes(producer: &mut Producer<'static, BUFFER_SIZE>,buf: &[u8;409
 //             led_on = true;
 //             for sample in grant_r.chunks_exact(2) {
 //                 let sample: [Sample;1] = unsafe{transmute([sample[0],sample[1]])};
-//                 control.gpio_set(0, false).await;
-//                 Timer::after_secs(1).await;
-//                 control.gpio_set(0, true).await;
-//                 Timer::after_secs(sample[0] as u64).await;
-//             }
+//                             }
 //             grant_r.release(frame_size);
 //         }
 //         else{
 //             if led_on{
 //                 info!("SETTING LED OFF");
-//                 control.gpio_set(0, false).await;
-//                 led_on = false;
 //             }
 //         }
 //     }

@@ -9,7 +9,6 @@
 extern crate alloc;
 use alloc::vec::Vec;
 use bbqueue::BBBuffer;
-use cortex_m::Peripherals;
 use cyw43_pio::PioSpi;
 use defmt::*;
 use embassy_executor::Spawner;
@@ -23,25 +22,22 @@ use embassy_time::{Duration, Timer};
 use embedded_alloc::Heap;
 use static_cell::make_static;
 use {defmt_rtt as _, panic_probe as _};
-use bbqueue::Error as QError;
 use embassy_rp::multicore::spawn_core1;
 use embassy_rp::multicore::Stack as MStack;
 use static_cell::StaticCell;
 use embassy_executor::Executor;
 mod queue;
-use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
-use embassy_sync::channel::Channel;
+// use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
+// use embassy_sync::channel::Channel;
 use queue::{decode_task,enqueue_bytes};
-use bbqueue::{Producer,Consumer};
-use cortex_m::Peripherals as CortexPeripherals;
+use bbqueue::Consumer;
 use queue::dequeue_frame_size;
-use cyw43::Control;
 use core::mem::transmute;
 use rmp3::Sample;
-enum LedState {
-    On,
-    Off,
-}
+// enum LedState {
+//     On,
+//     Off,
+// }
 
 #[global_allocator]
 static HEAP: Heap = Heap::empty();
@@ -49,11 +45,10 @@ static HEAP: Heap = Heap::empty();
 static mut CORE1_STACK: MStack<4096> = MStack::new();
 static EXECUTOR0: StaticCell<Executor> = StaticCell::new();
 static EXECUTOR1: StaticCell<Executor> = StaticCell::new();
-static CHANNEL: Channel<CriticalSectionRawMutex, LedState, 1> = Channel::new();
+// static CHANNEL: Channel<CriticalSectionRawMutex, LedState, 1> = Channel::new();
 
-
-const SAMPLE_RATE: usize = 8000; // 8-24KHz
-const BIT_RATE: usize = 64; // 64 Bit/s
+// const SAMPLE_RATE: usize = 8000; // 8-24KHz
+// const BIT_RATE: usize = 64; // 64 Bit/s
 const BUFFER_SIZE: usize = 10240;
 bind_interrupts!(struct Irqs {
     PIO0_IRQ_0 => InterruptHandler<PIO0>;
@@ -74,9 +69,9 @@ async fn wifi_task(
 ) -> ! {
     runner.run().await
 }
-pub async fn play_task(mut control: Control<'static>, mut consumer: Consumer<'static, BUFFER_SIZE>)->! {
+pub async fn play_task(mut consumer: Consumer<'static, BUFFER_SIZE>)->! {
     info!("STARTING PLAY_TASK");
-    control.gpio_set(0, false).await;
+    // CONTROL.gpio_set(0, false).await;
     let mut led_on: bool = false;
     //check queue status first
     loop{
@@ -87,17 +82,13 @@ pub async fn play_task(mut control: Control<'static>, mut consumer: Consumer<'st
             led_on = true;
             for sample in grant_r.chunks_exact(2) {
                 let sample: [Sample;1] = unsafe{transmute([sample[0],sample[1]])};
-                control.gpio_set(0, false).await;
-                Timer::after_secs(1).await;
-                control.gpio_set(0, true).await;
-                Timer::after_secs(sample[0] as u64).await;
-            }
+                info!("{}",sample);
+                            }
             grant_r.release(frame_size);
         }
         else{
             if led_on{
                 info!("SETTING LED OFF");
-                control.gpio_set(0, false).await;
                 led_on = false;
             }
         }
@@ -123,9 +114,6 @@ fn main() -> ! {
 async fn core0_task(
     spawner: Spawner,
     p: embassy_rp::Peripherals, 
-    // play_producer: Producer<'static, BUFFER_SIZE>,
-    // decode_consumer: Consumer<'static, BUFFER_SIZE>, 
-    // mut decode_producer: Producer<'static,BUFFER_SIZE>
 ) {
     info!("Hello from core 0");
     let fw = include_bytes!("../../embassy/cyw43-firmware/43439A0.bin");
@@ -189,7 +177,7 @@ async fn core0_task(
     // And now we can use it!
     spawn_core1(p.CORE1, unsafe { &mut CORE1_STACK }, move || {
         let executor1 = EXECUTOR1.init(Executor::new());
-        executor1.run(|spawner| unwrap!(spawner.spawn(core1_task(control,play_consumer))));
+        executor1.run(|spawner| unwrap!(spawner.spawn(core1_task(play_consumer))));
     });
 
     unwrap!(spawner.spawn(decode_task(decode_consumer, play_producer)));
@@ -198,12 +186,9 @@ async fn core0_task(
         let mut tx_buffer = [0; 4096];
         let mut buf = [0; 4096];
 
-
-
         let mut socket = TcpSocket::new(stack, &mut rx_buffer, &mut tx_buffer);
         socket.set_timeout(Some(Duration::from_secs(1000)));
 
-        // control.gpio_set(0, false).await;
         info!("Listening on TCP:1234...");
         // On error warn and continue
         if let Err(e) = socket.accept(1234).await {
@@ -211,7 +196,6 @@ async fn core0_task(
             continue;
         }
         info!("Received connection from {:?}", socket.remote_endpoint());
-        // control.gpio_set(0, true).await;
         loop {
             match socket.read(&mut buf).await {
                 Ok(0) => {
@@ -233,15 +217,7 @@ async fn core0_task(
 }
 
 #[embassy_executor::task]
-async fn core1_task(control: Control<'static>,consumer: Consumer<'static,BUFFER_SIZE>) {
-    play_task(control,consumer);
-    
-    // let led = LedState::new();
+async fn core1_task( consumer: Consumer<'static,BUFFER_SIZE>) {
+    play_task(consumer).await;
         info!("Hello from core 1");
-    // loop {
-    //     match CHANNEL.receive().await {
-    //         // LedState::On => led.set_high(),
-    //         // LedState::Off => led.set_low(),
-    //     }
-    // }
 }
