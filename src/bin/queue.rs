@@ -61,7 +61,10 @@ pub async fn decode_task(
         Timer::after_micros(0).await;
         if let Ok(grant_r) = consumer.read(){
             match decode_queue(&mut producer, &grant_r) {
-                Ok(size) => grant_r.release(size),
+                Ok(size) => {
+                    grant_r.release(size);
+                    info!("Decoded {} bytes", size)
+                }
                 Err(_) => {
                     warn!("decode_task had an error!");
                     grant_r.release(0);
@@ -78,6 +81,7 @@ pub fn dequeue_frame_size(consumer: &mut Consumer<'static, BUFFER_SIZE>) -> usiz
         let mut header = [0u8; 4];
         header.copy_from_slice(&grant_r[..4]);
         let header: [usize; 1] = unsafe { transmute(header) };
+        grant_r.release(4);
         header[0]
     }
     else { 0 }
